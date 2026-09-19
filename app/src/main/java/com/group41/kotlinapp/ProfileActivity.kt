@@ -31,5 +31,9 @@ class ProfileActivity : AppCompatActivity() {
         }
 
         bottomNav.selectedItemId = R.id.nav_profile
+
+        findViewById<View>(R.id.btn_edit_profile).setOnClickListener {
+            EditProfileBottomSheet().show(supportFragmentManager, "EditProfileBottomSheet")
+        }
     }
 }
