@@ -8,7 +8,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
-class Step2Activity : AppCompatActivity() {
+class CreateActivityStep2Activity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -17,7 +17,7 @@ class Step2Activity : AppCompatActivity() {
             isAppearanceLightStatusBars = true
         }
 
-        setContentView(R.layout.activity_step2)
+        setContentView(R.layout.activity_create_activity_step2)
 
         val root = findViewById<View>(R.id.main)
 

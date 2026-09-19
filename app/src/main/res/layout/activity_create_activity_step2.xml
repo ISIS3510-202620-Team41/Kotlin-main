@@ -7,7 +7,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background_light"
-    tools:context=".Step2Activity">
+    tools:context=".CreateActivityStep2Activity">
 
     <ImageButton
         android:id="@+id/btn_back"
