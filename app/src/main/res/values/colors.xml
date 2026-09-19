@@ -6,4 +6,7 @@
     <color name="green">#01A74C</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
+    <color name="background_light">#F7F9FB</color>
+    <color name="gray_text">#8A8F98</color>
+    <color name="step_inactive">#E6E8EC</color>
 </resources>

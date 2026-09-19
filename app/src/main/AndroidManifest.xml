@@ -29,6 +29,10 @@
             android:name=".CreateActivityStep1Activity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".CreateActivityStep2Activity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>
