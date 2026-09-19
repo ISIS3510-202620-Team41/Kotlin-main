@@ -11,7 +11,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.KotlinApp">
         <activity
-            android:name=".CreateActivityStep1Activity"
+            android:name=".MainActivity"
             android:exported="true"
             android:theme="@style/Theme.KotlinApp"
             android:windowSoftInputMode="adjustResize">
@@ -23,6 +23,10 @@
         </activity>
         <activity
             android:name=".ProfileActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".CreateActivityStep1Activity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />
     </application>
