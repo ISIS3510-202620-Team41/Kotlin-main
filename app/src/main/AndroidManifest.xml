@@ -26,8 +26,8 @@
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />
         <activity
-            android:name=".Step2Activity"
-            android:exported="false"
+            android:name=".CreateActivityStep1Activity"
+            android:exported="true"
             android:windowSoftInputMode="adjustResize" />
     </application>
 
