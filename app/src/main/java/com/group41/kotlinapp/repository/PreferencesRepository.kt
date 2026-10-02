@@ -5,7 +5,7 @@ import com.group41.kotlinapp.model.UserPreferences
 class PreferencesRepository {
 
     private var userPreferences = UserPreferences(
-        preferredCategories = setOf("Comida", "Cultural")
+        preferredCategories = emptySet()
     )
 
     fun getPreferences(): UserPreferences {
