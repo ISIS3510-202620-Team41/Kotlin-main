@@ -1,31 +1,27 @@
 package com.group41.kotlinapp.viewmodel
 
-import android.os.Handler
-import android.os.Looper
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.repository.ActivityRepository
 import com.group41.kotlinapp.repository.PreferencesRepository
+import kotlinx.coroutines.launch
 
 class RecommendationsViewModel : ViewModel() {
 
     private val activityRepository = ActivityRepository()
     private val preferencesRepository = PreferencesRepository()
 
-    private val mainHandler = Handler(Looper.getMainLooper())
-
     fun loadRecommendedActivities(
-        accessToken: String,
         latitude: Double,
         longitude: Double,
         radiusKm: Double = 10.0,
         onSuccess: (List<Activity>) -> Unit,
         onError: (String) -> Unit
     ) {
-        Thread {
+        viewModelScope.launch {
             try {
                 val activities = activityRepository.getRecommendedActivities(
-                    accessToken = accessToken,
                     latitude = latitude,
                     longitude = longitude,
                     radiusKm = radiusKm
@@ -42,16 +38,12 @@ class RecommendationsViewModel : ViewModel() {
                         }
                     }
 
-                mainHandler.post {
-                    onSuccess(orderedActivities)
-                }
+                onSuccess(orderedActivities)
 
             } catch (e: Exception) {
-                mainHandler.post {
-                    onError(e.message ?: "Unknown error")
-                }
+                onError(e.message ?: "Unknown error")
             }
-        }.start()
+        }
     }
 
     fun updatePreferences(categories: Set<String>) {
