@@ -272,7 +272,10 @@ fun RecommendationScreen(
             }
 
             items(recommendations) { activity ->
-                RecommendationCard(activity)
+                RecommendationCard(
+                    activity = activity,
+                    viewModel = viewModel
+                )
             }
 
             item {
@@ -283,7 +286,21 @@ fun RecommendationScreen(
 }
 
 @Composable
-fun RecommendationCard(activity: Activity) {
+fun RecommendationCard(
+    activity: Activity,
+    viewModel: RecommendationsViewModel
+) {
+    var isJoined by remember(activity.id) {
+        mutableStateOf(activity.joined)
+    }
+
+    var isJoining by remember(activity.id) {
+        mutableStateOf(false)
+    }
+
+    var joinError by remember(activity.id) {
+        mutableStateOf<String?>(null)
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -292,11 +309,9 @@ fun RecommendationCard(activity: Activity) {
             containerColor = Color(0xFFDDF4F8)
         )
     ) {
-
         Column(
             modifier = Modifier.padding(20.dp)
         ) {
-
             Text(
                 text = activity.name,
                 fontSize = 20.sp,
@@ -317,6 +332,53 @@ fun RecommendationCard(activity: Activity) {
                 text = "${activity.durationMinutes} min · ${activity.distanceMeters} m",
                 color = Color.DarkGray
             )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Button(
+                onClick = {
+                    isJoining = true
+                    joinError = null
+
+                    viewModel.joinActivity(
+                        activity = activity,
+                        onSuccess = {
+                            isJoined = true
+                            isJoining = false
+                        },
+                        onError = { error ->
+                            joinError = error
+                            isJoining = false
+                        }
+                    )
+                },
+                enabled = !isJoined && !isJoining,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = LlamallaBlue,
+                    contentColor = LlamallaBlack,
+                    disabledContainerColor = Color(0xFFD0E1E5),
+                    disabledContentColor = Color.Gray
+                )
+            ) {
+                Text(
+                    text = when {
+                        isJoining -> "Uniendo..."
+                        isJoined -> "Unido ✓"
+                        else -> "Unirme"
+                    }
+                )
+            }
+
+            joinError?.let { error ->
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = error,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }

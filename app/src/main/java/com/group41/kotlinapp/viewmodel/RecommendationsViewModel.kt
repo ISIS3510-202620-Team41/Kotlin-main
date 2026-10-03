@@ -49,4 +49,24 @@ class RecommendationsViewModel : ViewModel() {
     fun updatePreferences(categories: Set<String>) {
         preferencesRepository.updatePreferences(categories)
     }
+
+    fun joinActivity(
+        activity: Activity,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                activityRepository.joinActivity(
+                    activityId = activity.id,
+                    recommendationId = activity.recommendationId,
+                    freeTimeMinutes = activity.freeTimeMinutes
+                )
+                onSuccess()
+            } catch (e: Exception) {
+                onError(e.message ?: "Unknown error")
+            }
+        }
+    }
+
 }

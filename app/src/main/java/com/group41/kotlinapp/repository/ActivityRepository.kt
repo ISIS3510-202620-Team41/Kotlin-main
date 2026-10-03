@@ -10,7 +10,17 @@ import com.group41.kotlinapp.network.RecommendationsPage
 
 class ActivityRepository {
 
-
+    suspend fun joinActivity(
+        activityId: String,
+        recommendationId: String?,
+        freeTimeMinutes: Int?
+    ) {
+        ApiClient.api.join(
+            activityId,
+            recommendationId,
+            freeTimeMinutes
+        )
+    }
 
     suspend fun getRecommendedActivities(
         latitude: Double,
