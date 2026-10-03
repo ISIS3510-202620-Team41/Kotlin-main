@@ -52,6 +52,19 @@
                     app:layout_constraintStart_toStartOf="parent"
                     app:layout_constraintTop_toTopOf="@id/tv_name" />
 
+                <!-- Foto de perfil encima de las iniciales; oculta si no hay foto -->
+                <ImageView
+                    android:id="@+id/iv_avatar"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:contentDescription="Foto de perfil"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone"
+                    app:layout_constraintStart_toStartOf="@id/tv_avatar"
+                    app:layout_constraintEnd_toEndOf="@id/tv_avatar"
+                    app:layout_constraintTop_toTopOf="@id/tv_avatar"
+                    app:layout_constraintBottom_toBottomOf="@id/tv_avatar" />
+
                 <View
                     android:id="@+id/dot_online"
                     android:layout_width="18dp"

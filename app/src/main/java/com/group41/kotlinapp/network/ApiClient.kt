@@ -3,6 +3,8 @@ package com.group41.kotlinapp.network
 import android.content.Context
 import com.group41.kotlinapp.BuildConfig
 import com.group41.kotlinapp.analytics.Analytics
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -46,6 +48,26 @@ object ApiClient {
             .addConverterFactory(gson)
             .build()
             .create(ApiService::class.java)
+    }
+
+    /**
+     * URL de una imagen servida por el backend (ej. avatarUrl).
+     *
+     * El backend arma la URL con PUBLIC_BASE_URL, que por defecto es
+     * http://localhost:8080. Desde el emulador "localhost" es el propio
+     * teléfono, así que se reescribe al host real del backend.
+     */
+    fun mediaUrl(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        val parsed = url.toHttpUrlOrNull() ?: return url
+        if (parsed.host != "localhost" && parsed.host != "127.0.0.1") return url
+        val base = BASE_URL.toHttpUrl()
+        return parsed.newBuilder()
+            .scheme(base.scheme)
+            .host(base.host)
+            .port(base.port)
+            .build()
+            .toString()
     }
 
     /** Tras login o registro: guarda la sesión y habilita el envío de analytics. */

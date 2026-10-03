@@ -18,6 +18,10 @@ import com.group41.kotlinapp.network.isUnauthorized
 import kotlinx.coroutines.launch
 
 class ProfileActivity : AppCompatActivity() {
+
+    /** Usuario real cargado de /api/users/me; null mientras llega */
+    private var user: UserDto? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -49,8 +53,16 @@ class ProfileActivity : AppCompatActivity() {
         bottomNav.selectedItemId = R.id.nav_profile
 
         findViewById<View>(R.id.btn_edit_profile).setOnClickListener {
-            EditProfileBottomSheet().show(supportFragmentManager, "EditProfileBottomSheet")
+            // Hasta que llegue el usuario no hay datos reales que editar
+            val current = user ?: return@setOnClickListener
+            EditProfileBottomSheet.newInstance(current)
+                .show(supportFragmentManager, EditProfileBottomSheet.TAG)
         }
+
+        // Foto, nombre o descripción cambiados desde "Editar perfil"
+        supportFragmentManager.setFragmentResultListener(
+            EditProfileBottomSheet.RESULT_KEY, this
+        ) { _, result -> showUser(EditProfileBottomSheet.userFrom(result)) }
 
         findViewById<View>(R.id.btn_logout).setOnClickListener { button ->
             button.isEnabled = false
@@ -102,15 +114,10 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun showUser(user: UserDto) {
+        this.user = user
         findViewById<TextView>(R.id.tv_name).text = user.name
-        findViewById<TextView>(R.id.tv_avatar).text = initials(user.name)
         // Sin GONE: el avatar está anclado a tv_bio en el layout
         findViewById<TextView>(R.id.tv_bio).text = user.bio.orEmpty()
+        bindAvatar(findViewById(R.id.iv_avatar), findViewById(R.id.tv_avatar), user)
     }
-
-    private fun initials(name: String) = name.trim().split(Regex("\\s+"))
-        .filter { it.isNotEmpty() }
-        .take(2)
-        .joinToString("") { it.first().uppercase() }
-        .ifEmpty { "?" }
 }
