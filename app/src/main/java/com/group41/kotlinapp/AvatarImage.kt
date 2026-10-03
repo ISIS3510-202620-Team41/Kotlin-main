@@ -12,6 +12,7 @@ import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
 import coil.load
+import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import coil.transform.CircleCropTransformation
 import com.group41.kotlinapp.network.ApiClient
@@ -113,6 +114,8 @@ object AvatarImage {
             "file", "avatar.jpg", jpeg.toRequestBody("image/jpeg".toMediaType())
         )
 
+    /** Solo se llama tras comprobar SDK_INT >= 28: ImageDecoder no existe antes */
+    @RequiresApi(28)
     private fun decodeScaled(source: ImageDecoder.Source): Bitmap? =
         runCatching {
             ImageDecoder.decodeBitmap(source) { decoder, info, _ ->

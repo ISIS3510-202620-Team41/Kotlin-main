@@ -171,7 +171,9 @@ class ProfileViewModel(
      * cerraría el editor nuevo apenas abre.
      */
     fun onEditorOpened() {
-        while (_events.tryReceive().isSuccess) Unit
+        while (_events.tryReceive().isSuccess) {
+            // descartar
+        }
         _state.update { it.copy(nameError = null, bioError = null, urlError = null) }
     }
 
