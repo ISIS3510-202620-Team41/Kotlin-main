@@ -17,6 +17,14 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 10.0.2.2 es el localhost de la maquina vista desde el emulador.
+        // Para un celular fisico se sobreescriben en gradle.properties (o con -P):
+        //   apiBaseUrl=http://192.168.x.x:8080/
+        fun prop(name: String, default: String) = (project.findProperty(name) as String?) ?: default
+        buildConfigField("String", "API_BASE_URL", "\"${prop("apiBaseUrl", "http://10.0.2.2:8080/")}\"")
+        buildConfigField("String", "ANALYTICS_URL", "\"${prop("analyticsUrl", "http://10.0.2.2:8000")}\"")
+        buildConfigField("String", "ANALYTICS_INGEST_KEY", "\"${prop("analyticsIngestKey", "")}\"")
     }
 
     buildTypes {
@@ -33,6 +41,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -56,5 +65,13 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation("com.squareup.retrofit2:retrofit:3.0.0")
+    implementation("com.squareup.retrofit2:converter-gson:3.0.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("io.coil-kt:coil:2.7.0")
+    // ViewModel + viewModelScope (la misma versión de lifecycle que ya usa el proyecto)
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
+    // Tests de los ViewModel: misma versión de corrutinas que trae el proyecto
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

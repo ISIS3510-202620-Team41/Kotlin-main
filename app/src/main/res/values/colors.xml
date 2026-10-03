@@ -9,4 +9,9 @@
     <color name="background_light">#F7F9FB</color>
     <color name="gray_text">#8A8F98</color>
     <color name="step_inactive">#E6E8EC</color>
+    <color name="text_dark">#1B2433</color>
+    <color name="text_muted">#5F6B7A</color>
+    <color name="border_light">#E3E9EF</color>
+    <color name="blue_soft">#EAF6FB</color>
+    <color name="auth_bg_top">#E4F3FA</color>
 </resources>
