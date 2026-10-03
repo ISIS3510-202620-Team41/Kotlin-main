@@ -34,8 +34,7 @@ import com.group41.kotlinapp.ui.theme.LlamallaBlack
 
 @Composable
 fun NearbyMeetingPointScreen(
-    viewModel: NearbyActivitiesViewModel,
-    accessToken: String
+    viewModel: NearbyActivitiesViewModel
 ) {
     var latitudeText by remember {
         mutableStateOf("4.6382")
@@ -130,7 +129,6 @@ fun NearbyMeetingPointScreen(
                         errorMessage = null
 
                         viewModel.loadNearbyActivities(
-                            accessToken = accessToken,
                             latitude = latitude,
                             longitude = longitude,
                             radiusKm = radius,

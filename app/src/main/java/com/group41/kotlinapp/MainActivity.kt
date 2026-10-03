@@ -53,15 +53,14 @@ class MainActivity : ComponentActivity() {
 
         val recommendationsViewModel =
             ViewModelProvider(this)[RecommendationsViewModel::class.java]
-        val testAccessToken = ""
+
 
         enableEdgeToEdge()
 
         setContent {
             KotlinAppTheme {
                 RecommendationScreen(
-                    viewModel = recommendationsViewModel,
-                    accessToken = testAccessToken
+                    viewModel = recommendationsViewModel
                 )
             }
         }
@@ -70,8 +69,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun RecommendationScreen(
-    viewModel: RecommendationsViewModel,
-    accessToken: String
+    viewModel: RecommendationsViewModel
 ) {
 
     val context = LocalContext.current
@@ -196,7 +194,6 @@ fun RecommendationScreen(
                         errorMessage = null
 
                         viewModel.loadRecommendedActivities(
-                            accessToken = accessToken,
                             latitude = 4.6382,
                             longitude = -74.0840,
                             radiusKm = 10.0,

@@ -16,16 +16,15 @@ class NearbyMeetingPointActivity : ComponentActivity() {
         val nearbyActivitiesViewModel =
             ViewModelProvider(this)[NearbyActivitiesViewModel::class.java]
 
-        // Temporary until Sebas's authentication flow is integrated.
-        val testAccessToken = ""
+
 
         enableEdgeToEdge()
 
         setContent {
             KotlinAppTheme {
                 NearbyMeetingPointScreen(
-                    viewModel = nearbyActivitiesViewModel,
-                    accessToken = testAccessToken
+                    viewModel = nearbyActivitiesViewModel
+
                 )
             }
         }

@@ -2,58 +2,46 @@ package com.group41.kotlinapp.repository
 
 import com.group41.kotlinapp.model.Activity
 import org.json.JSONArray
-import java.net.HttpURLConnection
-import java.net.URL
 import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
+import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.network.RecommendationsPage
+
 
 class ActivityRepository {
 
-    private val baseUrl = "http://10.0.2.2:8080"
 
-    fun getRecommendedActivities(
-        accessToken: String,
+
+    suspend fun getRecommendedActivities(
         latitude: Double,
         longitude: Double,
-        radiusKm: Double = 5.0
+        radiusKm: Double = 10.0
     ): List<Activity> {
 
-        val url = URL(
-            "$baseUrl/api/activities/recommendations" +
-                    "?lat=$latitude&lon=$longitude&radius=$radiusKm"
+        val response = ApiClient.api.recommendations(
+            lat = latitude,
+            lon = longitude,
+            radiusKm = radiusKm
         )
 
-        val connection = url.openConnection() as HttpURLConnection
-
-        try {
-            connection.requestMethod = "GET"
-            connection.setRequestProperty(
-                "Authorization",
-                "Bearer $accessToken"
-            )
-            connection.setRequestProperty(
-                "Accept",
-                "application/json"
-            )
-
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                throw Exception(
-                    "Backend returned HTTP ${connection.responseCode}"
-                )
-            }
-
-            val response = connection.inputStream
-                .bufferedReader()
-                .use { it.readText() }
-
-            return parseRecommendations(response)
-
-        } finally {
-            connection.disconnect()
+        if (!response.isSuccessful) {
+            throw Exception("Backend returned HTTP ${response.code()}")
         }
+
+        val page = RecommendationsPage.from(response)
+
+        return parseRecommendations(
+            json = page.items.toString(),
+            recommendationId = page.recommendationId,
+            freeTimeMinutes = page.freeTimeMinutes
+        )
     }
 
-    private fun parseRecommendations(json: String): List<Activity> {
+    private fun parseRecommendations(
+        json: String,
+        recommendationId: String?,
+        freeTimeMinutes: Int?
+    ): List<Activity> {
         val array = JSONArray(json)
         val activities = mutableListOf<Activity>()
 
@@ -90,7 +78,9 @@ class ActivityRepository {
                     ),
                     durationMinutes = durationMinutes,
                     distanceMeters = (distanceKm * 1000).toInt(),
-                    score = recommendation.getDouble("score")
+                    score = recommendation.getDouble("score"),
+                    recommendationId = recommendationId,
+                    freeTimeMinutes = freeTimeMinutes
                 )
             )
         }
@@ -108,48 +98,25 @@ class ActivityRepository {
         }
     }
 
-    fun getNearbyActivities(
-        accessToken: String,
+    suspend fun getNearbyActivities(
         latitude: Double,
         longitude: Double,
         radiusKm: Double = 1.0
     ): List<Activity> {
 
-        val url = URL(
-            "$baseUrl/api/activities" +
-                    "?lat=$latitude&lon=$longitude&radius=$radiusKm"
+        val response = ApiClient.api.nearbyActivities(
+            lat = latitude,
+            lon = longitude,
+            radiusKm = radiusKm
         )
 
-        val connection = url.openConnection() as HttpURLConnection
-
-        try {
-            connection.requestMethod = "GET"
-
-            connection.setRequestProperty(
-                "Authorization",
-                "Bearer $accessToken"
-            )
-
-            connection.setRequestProperty(
-                "Accept",
-                "application/json"
-            )
-
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                throw Exception(
-                    "Backend returned HTTP ${connection.responseCode}"
-                )
-            }
-
-            val response = connection.inputStream
-                .bufferedReader()
-                .use { it.readText() }
-
-            return parseNearbyActivities(response)
-
-        } finally {
-            connection.disconnect()
+        if (!response.isSuccessful) {
+            throw Exception("Backend returned HTTP ${response.code()}")
         }
+
+        val json = response.body()?.toString() ?: "[]"
+
+        return parseNearbyActivities(json)
     }
 
     private fun parseNearbyActivities(json: String): List<Activity> {

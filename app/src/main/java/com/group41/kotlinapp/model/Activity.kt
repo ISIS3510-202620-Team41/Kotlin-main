@@ -7,5 +7,7 @@ data class Activity(
     val durationMinutes: Int,
     val distanceMeters: Int,
     val score: Double = 0.0,
-    val joined: Boolean = false
+    val joined: Boolean = false,
+    val recommendationId: String? = null,
+    val freeTimeMinutes: Int? = null
 )
