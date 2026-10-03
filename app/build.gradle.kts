@@ -17,6 +17,14 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 10.0.2.2 es el localhost de la maquina vista desde el emulador.
+        // Para un celular fisico se sobreescriben en gradle.properties (o con -P):
+        //   apiBaseUrl=http://192.168.x.x:8080/
+        fun prop(name: String, default: String) = (project.findProperty(name) as String?) ?: default
+        buildConfigField("String", "API_BASE_URL", "\"${prop("apiBaseUrl", "http://10.0.2.2:8080/")}\"")
+        buildConfigField("String", "ANALYTICS_URL", "\"${prop("analyticsUrl", "http://10.0.2.2:8000")}\"")
+        buildConfigField("String", "ANALYTICS_INGEST_KEY", "\"${prop("analyticsIngestKey", "")}\"")
     }
 
     buildTypes {
@@ -32,6 +40,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

@@ -96,7 +96,7 @@ class RegisterActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val response = ApiClient.api.register(RegisterRequest(email, password, name))
-                ApiClient.tokens.save(response) // el registro ya deja la sesión iniciada
+                ApiClient.onAuthenticated(response) // el registro ya deja la sesión iniciada
                 openHome()
             } catch (e: HttpException) {
                 if (e.code() == 409) {

@@ -43,6 +43,7 @@ class LoginActivity : AppCompatActivity() {
         WindowCompat.getInsetsController(window, window.decorView)
             .isAppearanceLightStatusBars = true
         setContentView(R.layout.activity_login)
+        requestLocalNetworkIfNeeded()
 
         tilEmail = findViewById(R.id.til_email)
         tilPassword = findViewById(R.id.til_password)
@@ -92,7 +93,7 @@ class LoginActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val response = ApiClient.api.login(LoginRequest(email, password))
-                ApiClient.tokens.save(response)
+                ApiClient.onAuthenticated(response)
                 openHome()
             } catch (e: HttpException) {
                 showError(

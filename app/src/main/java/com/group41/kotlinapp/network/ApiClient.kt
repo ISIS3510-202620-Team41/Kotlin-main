@@ -1,6 +1,8 @@
 package com.group41.kotlinapp.network
 
 import android.content.Context
+import com.group41.kotlinapp.BuildConfig
+import com.group41.kotlinapp.analytics.Analytics
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -9,7 +11,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
 
 object ApiClient {
-    const val BASE_URL = "http://10.0.2.2:8080/"
+    val BASE_URL: String = BuildConfig.API_BASE_URL
 
     lateinit var tokens: TokenStore
         private set
@@ -46,6 +48,23 @@ object ApiClient {
             .create(ApiService::class.java)
     }
 
+    /** Tras login o registro: guarda la sesión y habilita el envío de analytics. */
+    fun onAuthenticated(response: AuthResponse) {
+        tokens.save(response)
+        Analytics.setUserId(response.user.id)
+    }
+
+    /**
+     * Revoca el refresh token en el backend y borra la sesión local.
+     * Sin red igual se cierra la sesión en el teléfono.
+     */
+    suspend fun logout() {
+        Analytics.flushNow()
+        tokens.refresh?.let { runCatching { api.logout(RefreshRequest(it)) } }
+        tokens.clear()
+        Analytics.clearUserId()
+    }
+
     @Synchronized
     private fun refreshAndRetry(response: Response, refreshApi: ApiService): Request? {
         if (response.request.url.encodedPath.startsWith("/api/auth/")) return null
@@ -65,10 +84,12 @@ object ApiClient {
             return null
         }
         val body = result.body()
-        if (!result.isSuccessful || body == null) {
+        if (result.code() == 401 || result.code() == 400) {
             tokens.clear() // el refresh también venció: hay que volver al login
             return null
         }
+        // Un 5xx no significa que la sesión murió: no se cierra, se reintenta luego.
+        if (!result.isSuccessful || body == null) return null
         tokens.save(body)
         return response.request.newBuilder()
             .header("Authorization", "Bearer ${body.accessToken}")

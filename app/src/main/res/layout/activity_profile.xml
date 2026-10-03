@@ -104,6 +104,24 @@
                     app:strokeColor="@color/white"
                     app:strokeWidth="1.5dp" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_logout"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="Cerrar sesión"
+                    android:textAllCaps="false"
+                    android:textColor="@color/white"
+                    android:textSize="14sp"
+                    app:backgroundTint="#33FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:layout_constraintStart_toEndOf="@id/btn_edit_profile"
+                    app:layout_constraintTop_toTopOf="@id/btn_edit_profile"
+                    app:strokeColor="@color/white"
+                    app:strokeWidth="1.5dp" />
+
                 <LinearLayout
                     android:id="@+id/ll_stats"
                     android:layout_width="0dp"
