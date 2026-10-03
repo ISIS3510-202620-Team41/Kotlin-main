@@ -52,6 +52,19 @@
                     app:layout_constraintStart_toStartOf="parent"
                     app:layout_constraintTop_toTopOf="@id/tv_name" />
 
+                <!-- Foto de perfil encima de las iniciales; oculta si no hay foto -->
+                <ImageView
+                    android:id="@+id/iv_avatar"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:contentDescription="Foto de perfil"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone"
+                    app:layout_constraintStart_toStartOf="@id/tv_avatar"
+                    app:layout_constraintEnd_toEndOf="@id/tv_avatar"
+                    app:layout_constraintTop_toTopOf="@id/tv_avatar"
+                    app:layout_constraintBottom_toBottomOf="@id/tv_avatar" />
+
                 <View
                     android:id="@+id/dot_online"
                     android:layout_width="18dp"
@@ -101,6 +114,24 @@
                     app:cornerRadius="24dp"
                     app:layout_constraintStart_toStartOf="parent"
                     app:layout_constraintTop_toBottomOf="@id/tv_avatar"
+                    app:strokeColor="@color/white"
+                    app:strokeWidth="1.5dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_logout"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="Cerrar sesión"
+                    android:textAllCaps="false"
+                    android:textColor="@color/white"
+                    android:textSize="14sp"
+                    app:backgroundTint="#33FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:layout_constraintStart_toEndOf="@id/btn_edit_profile"
+                    app:layout_constraintTop_toTopOf="@id/btn_edit_profile"
                     app:strokeColor="@color/white"
                     app:strokeWidth="1.5dp" />
 
