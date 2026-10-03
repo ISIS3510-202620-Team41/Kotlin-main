@@ -12,7 +12,7 @@ import androidx.core.content.ContextCompat
 fun Activity.openHome() {
     // Por ahora el perfil. Cuando entre #14, cambiar a MainActivity
     startActivity(
-        Intent(this, ProfileActivity::class.java)
+        Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
     )
 }
