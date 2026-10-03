@@ -48,26 +48,41 @@ class MainActivity : ComponentActivity() {
 
         val recommendationsViewModel =
             ViewModelProvider(this)[RecommendationsViewModel::class.java]
+        val testAccessToken = ""
 
         enableEdgeToEdge()
 
         setContent {
             KotlinAppTheme {
-                RecommendationScreen(recommendationsViewModel)
+                RecommendationScreen(
+                    viewModel = recommendationsViewModel,
+                    accessToken = testAccessToken
+                )
             }
         }
     }
 }
 
 @Composable
-fun RecommendationScreen(viewModel: RecommendationsViewModel) {
+fun RecommendationScreen(
+    viewModel: RecommendationsViewModel,
+    accessToken: String
+) {
 
     var selectedCategories by remember {
         mutableStateOf(setOf<String>())
     }
 
     var recommendations by remember {
-        mutableStateOf(viewModel.getRecommendedActivities())
+        mutableStateOf(emptyList<Activity>())
+    }
+
+    var isLoading by remember {
+        mutableStateOf(false)
+    }
+
+    var errorMessage by remember {
+        mutableStateOf<String?>(null)
     }
 
     val categories = listOf(
@@ -169,8 +184,29 @@ fun RecommendationScreen(viewModel: RecommendationsViewModel) {
                 Button(
                     onClick = {
                         viewModel.updatePreferences(selectedCategories)
-                        recommendations = viewModel.getRecommendedActivities()
+
+                        isLoading = true
+                        errorMessage = null
+
+                        viewModel.loadRecommendedActivities(
+                            accessToken = accessToken,
+                            latitude = 4.6382,
+                            longitude = -74.0840,
+                            radiusKm = 10.0,
+
+                            onSuccess = { activities ->
+                                recommendations = activities
+                                isLoading = false
+                            },
+
+                            onError = { error ->
+                                errorMessage = error
+                                isLoading = false
+                            }
+                        )
                     },
+
+                    enabled = !isLoading,
 
                     modifier = Modifier
                         .fillMaxWidth()
@@ -187,6 +223,21 @@ fun RecommendationScreen(viewModel: RecommendationsViewModel) {
                         fontSize = 16.sp
                     )
                 }
+
+                if (isLoading) {
+                    Text(
+                        text = "Cargando recomendaciones...",
+                        color = Color.Gray
+                    )
+                }
+
+                errorMessage?.let { error ->
+                    Text(
+                        text = "Error: $error",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
 
                 Spacer(modifier = Modifier.height(18.dp))
 
