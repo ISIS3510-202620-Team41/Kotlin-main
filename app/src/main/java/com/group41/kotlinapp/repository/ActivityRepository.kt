@@ -46,14 +46,29 @@ class ActivityRepository {
                 .bufferedReader()
                 .use { it.readText() }
 
-            return parseRecommendations(response)
+            val recommendationId =
+                connection.getHeaderField("X-Recommendation-Id")
+
+            val freeTimeMinutes =
+                connection.getHeaderField("X-Free-Time-Minutes")
+                    ?.toIntOrNull()
+
+            return parseRecommendations(
+                json = response,
+                recommendationId = recommendationId,
+                freeTimeMinutes = freeTimeMinutes
+            )
 
         } finally {
             connection.disconnect()
         }
     }
 
-    private fun parseRecommendations(json: String): List<Activity> {
+    private fun parseRecommendations(
+        json: String,
+        recommendationId: String?,
+        freeTimeMinutes: Int?
+    ): List<Activity> {
         val array = JSONArray(json)
         val activities = mutableListOf<Activity>()
 
@@ -91,7 +106,9 @@ class ActivityRepository {
                     durationMinutes = durationMinutes,
                     distanceMeters = (distanceKm * 1000).toInt(),
                     score = recommendation.getDouble("score"),
-                    joined = activityJson.optBoolean("joined", false)
+                    joined = activityJson.optBoolean("joined", false),
+                    recommendationId = recommendationId,
+                    freeTimeMinutes = freeTimeMinutes
                 )
             )
         }
@@ -110,9 +127,30 @@ class ActivityRepository {
     }
     fun joinActivity(
         accessToken: String,
-        activityId: String
+        activityId: String,
+        recommendationId: String?,
+        freeTimeMinutes: Int?
     ) {
-        val url = URL("$baseUrl/api/activities/$activityId/join")
+        val queryParams = mutableListOf<String>()
+
+        if (!recommendationId.isNullOrBlank()) {
+            queryParams.add("recommendationId=$recommendationId")
+        }
+
+        if (freeTimeMinutes != null) {
+            queryParams.add("freeTimeMinutes=$freeTimeMinutes")
+        }
+
+        val query =
+            if (queryParams.isEmpty()) {
+                ""
+            } else {
+                "?" + queryParams.joinToString("&")
+            }
+
+        val url = URL(
+            "$baseUrl/api/activities/$activityId/join$query"
+        )
 
         val connection = url.openConnection() as HttpURLConnection
 

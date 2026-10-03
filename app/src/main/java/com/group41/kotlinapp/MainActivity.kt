@@ -328,6 +328,8 @@ fun RecommendationCard(
                     viewModel.joinActivity(
                         accessToken = accessToken,
                         activityId = activity.id,
+                        recommendationId = activity.recommendationId,
+                        freeTimeMinutes = activity.freeTimeMinutes,
 
                         onSuccess = {
                             joined = true

@@ -61,6 +61,8 @@ class RecommendationsViewModel : ViewModel() {
     fun joinActivity(
         accessToken: String,
         activityId: String,
+        recommendationId: String?,
+        freeTimeMinutes: Int?,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -68,7 +70,9 @@ class RecommendationsViewModel : ViewModel() {
             try {
                 activityRepository.joinActivity(
                     accessToken = accessToken,
-                    activityId = activityId
+                    activityId = activityId,
+                    recommendationId = recommendationId,
+                    freeTimeMinutes = freeTimeMinutes
                 )
 
                 mainHandler.post {
