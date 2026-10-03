@@ -40,6 +40,11 @@ import androidx.lifecycle.ViewModelProvider
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.viewmodel.RecommendationsViewModel
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
+import com.group41.kotlinapp.ui.theme.LlamallaBlue
+import com.group41.kotlinapp.ui.theme.LlamallaRose
+import com.group41.kotlinapp.ui.theme.LlamallaBlack
 
 class MainActivity : ComponentActivity() {
 
@@ -66,6 +71,8 @@ class MainActivity : ComponentActivity() {
 fun RecommendationScreen(
     viewModel: RecommendationsViewModel
 ) {
+
+    val context = LocalContext.current
 
     var selectedCategories by remember {
         mutableStateOf(setOf<String>())
@@ -115,7 +122,7 @@ fun RecommendationScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .background(
-                            color = Color(0xFF87D0E0),
+                            color = LlamallaBlue,
                             shape = RoundedCornerShape(10.dp)
                         )
                         .padding(horizontal = 14.dp, vertical = 8.dp)
@@ -194,7 +201,6 @@ fun RecommendationScreen(
                             onSuccess = { activities ->
                                 recommendations = activities
                                 isLoading = false
-                                errorMessage = null
                             },
 
                             onError = { error ->
@@ -213,7 +219,7 @@ fun RecommendationScreen(
                     shape = RoundedCornerShape(18.dp),
 
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFD50057)
+                        containerColor = LlamallaRose
                     )
                 ) {
                     Text(
@@ -236,6 +242,25 @@ fun RecommendationScreen(
                     )
                 }
 
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = {
+                        val intent = Intent(
+                            context,
+                            NearbyMeetingPointActivity::class.java
+                        )
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LlamallaBlue,
+                        contentColor = LlamallaBlack
+                    )
+                ) {
+                    Text("Buscar por punto de encuentro")
+                }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
@@ -265,8 +290,7 @@ fun RecommendationCard(
     activity: Activity,
     viewModel: RecommendationsViewModel
 ) {
-
-    var joined by remember(activity.id) {
+    var isJoined by remember(activity.id) {
         mutableStateOf(activity.joined)
     }
 
@@ -285,11 +309,9 @@ fun RecommendationCard(
             containerColor = Color(0xFFDDF4F8)
         )
     ) {
-
         Column(
             modifier = Modifier.padding(20.dp)
         ) {
-
             Text(
                 text = activity.name,
                 fontSize = 20.sp,
@@ -300,21 +322,18 @@ fun RecommendationCard(
 
             Text(
                 text = activity.category,
-                fontSize = 16.sp,
-                color = Color(0xFFD50057),
-                fontWeight = FontWeight.Bold
+                color = LlamallaRose,
+                fontWeight = FontWeight.SemiBold
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = "${activity.durationMinutes} min · ${activity.distanceMeters} m",
-                fontSize = 16.sp,
                 color = Color.DarkGray
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
-
+            Spacer(modifier = Modifier.height(14.dp))
 
             Button(
                 onClick = {
@@ -322,30 +341,31 @@ fun RecommendationCard(
                     joinError = null
 
                     viewModel.joinActivity(
-                        activityId = activity.id,
-                        recommendationId = activity.recommendationId,
-                        freeTimeMinutes = activity.freeTimeMinutes,
-
+                        activity = activity,
                         onSuccess = {
-                            joined = true
+                            isJoined = true
                             isJoining = false
                         },
-
                         onError = { error ->
                             joinError = error
                             isJoining = false
                         }
                     )
                 },
-
-                enabled = !joined && !isJoining,
-
-                modifier = Modifier.fillMaxWidth()
+                enabled = !isJoined && !isJoining,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = LlamallaBlue,
+                    contentColor = LlamallaBlack,
+                    disabledContainerColor = Color(0xFFD0E1E5),
+                    disabledContentColor = Color.Gray
+                )
             ) {
                 Text(
                     text = when {
-                        joined -> "Unido ✓"
-                        isJoining -> "Uniéndome..."
+                        isJoining -> "Uniendo..."
+                        isJoined -> "Unido ✓"
                         else -> "Unirme"
                     }
                 )
@@ -355,7 +375,7 @@ fun RecommendationCard(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "Error: $error",
+                    text = error,
                     color = MaterialTheme.colorScheme.error
                 )
             }

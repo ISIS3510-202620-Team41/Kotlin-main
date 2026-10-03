@@ -10,13 +10,14 @@ import androidx.core.content.ContextCompat
 
 /** Abre la app y borra el login del historial (el botón atrás no vuelve al login) */
 fun Activity.openHome() {
-    // Por ahora el perfil. Cuando entre #14, cambiar a MainActivity
     startActivity(
         Intent(this, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            .addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK
+            )
     )
 }
-
 /**
  * Android 17 (API 37) exige ACCESS_LOCAL_NETWORK para conectarse a IPs de la red
  * local, y el backend de desarrollo vive ahí (10.0.2.2 o la IP del PC). Sin él,

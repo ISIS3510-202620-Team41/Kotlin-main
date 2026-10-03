@@ -12,10 +12,6 @@ class RecommendationsViewModel : ViewModel() {
     private val activityRepository = ActivityRepository()
     private val preferencesRepository = PreferencesRepository()
 
-    fun updatePreferences(categories: Set<String>) {
-        preferencesRepository.updatePreferences(categories)
-    }
-
     fun loadRecommendedActivities(
         latitude: Double,
         longitude: Double,
@@ -25,24 +21,20 @@ class RecommendationsViewModel : ViewModel() {
     ) {
         viewModelScope.launch {
             try {
+                val activities = activityRepository.getRecommendedActivities(
+                    latitude = latitude,
+                    longitude = longitude,
+                    radiusKm = radiusKm
+                )
 
-                val activities =
-                    activityRepository.getRecommendedActivities(
-                        latitude = latitude,
-                        longitude = longitude,
-                        radiusKm = radiusKm
-                    )
-
-                val preferences =
-                    preferencesRepository.getPreferences()
+                val preferences = preferencesRepository.getPreferences()
 
                 val orderedActivities =
                     if (preferences.preferredCategories.isEmpty()) {
                         activities
                     } else {
                         activities.sortedByDescending { activity ->
-                            activity.category in
-                                    preferences.preferredCategories
+                            activity.category in preferences.preferredCategories
                         }
                     }
 
@@ -54,27 +46,27 @@ class RecommendationsViewModel : ViewModel() {
         }
     }
 
+    fun updatePreferences(categories: Set<String>) {
+        preferencesRepository.updatePreferences(categories)
+    }
+
     fun joinActivity(
-        activityId: String,
-        recommendationId: String?,
-        freeTimeMinutes: Int?,
+        activity: Activity,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
         viewModelScope.launch {
             try {
-
                 activityRepository.joinActivity(
-                    activityId = activityId,
-                    recommendationId = recommendationId,
-                    freeTimeMinutes = freeTimeMinutes
+                    activityId = activity.id,
+                    recommendationId = activity.recommendationId,
+                    freeTimeMinutes = activity.freeTimeMinutes
                 )
-
                 onSuccess()
-
             } catch (e: Exception) {
                 onError(e.message ?: "Unknown error")
             }
         }
     }
+
 }
