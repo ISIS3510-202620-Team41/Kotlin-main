@@ -10,28 +10,33 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import com.group41.kotlinapp.network.ApiClient
-import com.group41.kotlinapp.network.UpdateProfileRequest
 import com.group41.kotlinapp.network.UserDto
-import com.group41.kotlinapp.network.isUnauthorized
-import com.group41.kotlinapp.network.userMessage
-import kotlinx.coroutines.Dispatchers
+import com.group41.kotlinapp.viewmodel.ProfileEvent
+import com.group41.kotlinapp.viewmodel.ProfileUiState
+import com.group41.kotlinapp.viewmodel.ProfileViewModel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Editar perfil: foto (galería o URL), nombre y descripción.
  *
- * La foto se sube apenas se elige; nombre y descripción se guardan con
- * "Guardar cambios". Cada cambio se avisa a ProfileActivity con RESULT_KEY.
+ * Usa el ProfileViewModel de ProfileActivity: lo que cambia aquí se ve al
+ * instante en el perfil, y una subida en curso no se corta al rotar.
  */
 class EditProfileBottomSheet : BottomSheetDialogFragment() {
 
-    private lateinit var user: UserDto
+    /** El de la Activity, no uno propio: así el perfil y el editor comparten el usuario */
+    private val viewModel: ProfileViewModel by lazy {
+        ViewModelProvider(requireActivity())[ProfileViewModel::class.java]
+    }
+
+    /** Último usuario dibujado: la foto solo se recarga si cambió */
+    private var shownUser: UserDto? = null
 
     private lateinit var avatarImage: ImageView
     private lateinit var avatarInitials: TextView
@@ -46,7 +51,10 @@ class EditProfileBottomSheet : BottomSheetDialogFragment() {
 
     /** Selector de fotos del sistema: no necesita permiso de almacenamiento */
     private val pickPhoto = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) uploadPhoto { AvatarImage.fromUri(requireContext(), uri) }
+        if (uri == null) return@registerForActivityResult
+        // Contexto de la app, no del fragment: la lectura puede seguir tras rotar
+        val appContext = requireContext().applicationContext
+        viewModel.uploadAvatar { AvatarImage.fromUri(appContext, uri) }
     }
 
     override fun onCreateView(
@@ -60,8 +68,6 @@ class EditProfileBottomSheet : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        user = userFrom(requireArguments())
-
         avatarImage = view.findViewById(R.id.iv_edit_avatar)
         avatarInitials = view.findViewById(R.id.tv_edit_avatar)
         avatarProgress = view.findViewById(R.id.progress_avatar)
@@ -73,9 +79,14 @@ class EditProfileBottomSheet : BottomSheetDialogFragment() {
         bio = view.findViewById(R.id.et_bio)
         save = view.findViewById(R.id.btn_save_changes)
 
-        name.setText(user.name)
-        bio.setText(user.bio.orEmpty())
-        showAvatar()
+        // Solo al abrir: al rotar, los campos conservan lo que el usuario ya escribió
+        if (savedInstanceState == null) {
+            viewModel.onEditorOpened()
+            viewModel.state.value.user?.let {
+                name.setText(it.name)
+                bio.setText(it.bio.orEmpty())
+            }
+        }
 
         view.findViewById<View>(R.id.btn_close).setOnClickListener { dismiss() }
 
@@ -86,107 +97,43 @@ class EditProfileBottomSheet : BottomSheetDialogFragment() {
         avatarInitials.setOnClickListener { uploadButton.performClick() }
         avatarImage.setOnClickListener { uploadButton.performClick() }
 
-        useUrl.setOnClickListener {
-            val url = photoUrl.text.toString().trim()
-            if (url.isEmpty()) {
-                photoUrl.error = "Pega la URL de una imagen"
-                return@setOnClickListener
-            }
-            uploadPhoto { AvatarImage.fromUrl(url) }
+        useUrl.setOnClickListener { viewModel.uploadAvatarFromUrl(photoUrl.text.toString()) }
+        removePhoto.setOnClickListener { viewModel.removeAvatar() }
+        save.setOnClickListener {
+            viewModel.saveProfile(name.text.toString(), bio.text.toString())
         }
 
-        removePhoto.setOnClickListener { removePhoto() }
-        save.setOnClickListener { saveProfile() }
-    }
-
-    private fun uploadPhoto(prepare: () -> ByteArray) {
-        setBusy(true)
         viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                val jpeg = withContext(Dispatchers.IO) { prepare() }
-                onUserUpdated(ApiClient.api.uploadAvatar(AvatarImage.toPart(jpeg)))
-                photoUrl.text.clear()
-                toast("Foto actualizada")
-            } catch (e: AvatarException) {
-                toast(e.message.orEmpty())
-            } catch (e: Exception) {
-                handleApiError(e)
-            } finally {
-                setBusy(false)
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch { viewModel.state.collect(::render) }
+                launch { viewModel.events.collect(::onEvent) }
             }
         }
     }
 
-    private fun removePhoto() {
-        setBusy(true)
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                onUserUpdated(ApiClient.api.deleteAvatar())
-            } catch (e: Exception) {
-                handleApiError(e)
-            } finally {
-                setBusy(false)
-            }
-        }
-    }
-
-    private fun saveProfile() {
-        val newName = name.text.toString().trim()
-        val newBio = bio.text.toString().trim()
-
-        // Mismas reglas que UpdateProfileRequest en el backend
-        if (newName.isEmpty()) {
-            name.error = "Escribe tu nombre"
-            return
-        }
-        if (newName.length > 80) {
-            name.error = "Máximo 80 caracteres"
-            return
-        }
-        if (newBio.length > 300) {
-            bio.error = "Máximo 300 caracteres"
-            return
-        }
-
-        setBusy(true)
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                onUserUpdated(ApiClient.api.updateMe(UpdateProfileRequest(newName, newBio)))
-                dismiss()
-            } catch (e: Exception) {
-                handleApiError(e)
-                setBusy(false)
-            }
-        }
-    }
-
-    private fun onUserUpdated(updated: UserDto) {
-        user = updated
-        // Para que el bottom sheet recreado (ej. al rotar) muestre lo último
-        arguments = argsFor(updated)
-        showAvatar()
-        parentFragmentManager.setFragmentResult(RESULT_KEY, argsFor(updated))
-    }
-
-    private fun showAvatar() {
-        bindAvatar(avatarImage, avatarInitials, user)
-        removePhoto.isVisible = user.avatarUrl != null
-    }
-
-    private fun handleApiError(e: Exception) {
-        if (e.isUnauthorized()) {
-            // El authenticator ya intentó refrescar: la sesión venció
-            ApiClient.tokens.clear()
+    private fun render(state: ProfileUiState) {
+        // La sesión venció: se cierra el editor y ProfileActivity lleva al login
+        if (state.sessionExpired) {
             dismiss()
-            activity?.openLogin("Tu sesión expiró. Inicia sesión de nuevo")
             return
         }
-        toast(e.userMessage())
-    }
 
-    private fun setBusy(busy: Boolean) {
-        if (view == null) return
-        avatarProgress.isVisible = busy
+        val user = state.user
+        if (user != null && user != shownUser) {
+            if (shownUser != null && user.avatarUrl != shownUser?.avatarUrl) {
+                photoUrl.text.clear()
+            }
+            shownUser = user
+            bindAvatar(avatarImage, avatarInitials, user)
+        }
+        removePhoto.isVisible = user?.avatarUrl != null
+
+        name.error = state.nameError
+        bio.error = state.bioError
+        photoUrl.error = state.urlError
+
+        val busy = state.avatarBusy || state.saving
+        avatarProgress.isVisible = state.avatarBusy
         uploadButton.isEnabled = !busy
         avatarImage.isEnabled = !busy
         avatarInitials.isEnabled = !busy
@@ -195,34 +142,15 @@ class EditProfileBottomSheet : BottomSheetDialogFragment() {
         save.isEnabled = !busy
     }
 
-    private fun toast(message: String) {
-        context?.let { Toast.makeText(it, message, Toast.LENGTH_SHORT).show() }
+    private fun onEvent(event: ProfileEvent) {
+        when (event) {
+            is ProfileEvent.Message ->
+                Toast.makeText(requireContext(), event.text, Toast.LENGTH_SHORT).show()
+            ProfileEvent.Saved -> dismiss()
+        }
     }
 
     companion object {
         const val TAG = "EditProfileBottomSheet"
-
-        /** ProfileActivity escucha esta clave para refrescar el encabezado */
-        const val RESULT_KEY = "profile_updated"
-
-        fun newInstance(user: UserDto) = EditProfileBottomSheet().apply {
-            arguments = argsFor(user)
-        }
-
-        fun argsFor(user: UserDto) = bundleOf(
-            "id" to user.id,
-            "email" to user.email,
-            "name" to user.name,
-            "bio" to user.bio,
-            "avatarUrl" to user.avatarUrl
-        )
-
-        fun userFrom(bundle: Bundle) = UserDto(
-            id = bundle.getString("id").orEmpty(),
-            email = bundle.getString("email").orEmpty(),
-            name = bundle.getString("name").orEmpty(),
-            bio = bundle.getString("bio"),
-            avatarUrl = bundle.getString("avatarUrl")
-        )
     }
 }

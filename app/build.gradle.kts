@@ -68,4 +68,8 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:3.0.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil:2.7.0")
+    // ViewModel + viewModelScope (la misma versión de lifecycle que ya usa el proyecto)
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
+    // Tests de los ViewModel: misma versión de corrutinas que trae el proyecto
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
