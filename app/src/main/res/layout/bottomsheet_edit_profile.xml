@@ -57,6 +57,30 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!-- Foto de perfil encima de las iniciales; oculta si no hay foto -->
+    <ImageView
+        android:id="@+id/iv_edit_avatar"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:contentDescription="Foto de perfil"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="@id/tv_edit_avatar"
+        app:layout_constraintEnd_toEndOf="@id/tv_edit_avatar"
+        app:layout_constraintTop_toTopOf="@id/tv_edit_avatar"
+        app:layout_constraintBottom_toBottomOf="@id/tv_edit_avatar" />
+
+    <ProgressBar
+        android:id="@+id/progress_avatar"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:indeterminateTint="@color/white"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="@id/tv_edit_avatar"
+        app:layout_constraintEnd_toEndOf="@id/tv_edit_avatar"
+        app:layout_constraintTop_toTopOf="@id/tv_edit_avatar"
+        app:layout_constraintBottom_toBottomOf="@id/tv_edit_avatar" />
+
     <ImageButton
         android:id="@+id/btn_upload_photo"
         android:layout_width="36dp"
@@ -68,6 +92,21 @@
         app:tint="@color/white"
         app:layout_constraintEnd_toEndOf="@id/tv_edit_avatar"
         app:layout_constraintBottom_toBottomOf="@id/tv_edit_avatar" />
+
+    <TextView
+        android:id="@+id/tv_remove_photo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="?attr/selectableItemBackground"
+        android:padding="6dp"
+        android:text="Quitar foto"
+        android:textColor="@color/rosewood"
+        android:textSize="14sp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/tv_edit_avatar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <EditText
         android:id="@+id/et_photo_url"
@@ -82,13 +121,14 @@
         android:textColor="@color/black"
         android:textColorHint="#999999"
         android:textSize="14sp"
-        app:layout_constraintTop_toBottomOf="@id/tv_edit_avatar"
+        app:layout_constraintTop_toBottomOf="@id/tv_remove_photo"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toStartOf="@id/btn_use_url" />
+        app:layout_constraintEnd_toStartOf="@id/btn_use_url"
+        app:layout_goneMarginTop="20dp" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_use_url"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="0dp"
         android:layout_marginStart="10dp"
         android:backgroundTint="@color/blue"
