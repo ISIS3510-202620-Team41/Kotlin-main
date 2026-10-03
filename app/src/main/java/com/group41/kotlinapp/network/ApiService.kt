@@ -55,6 +55,13 @@ interface ApiService {
         @Query("tz") tz: String = TimeZone.getDefault().id
     ): Response<JsonArray>
 
+    @GET("api/activities")
+    suspend fun nearbyActivities(
+        @Query("lat") lat: Double,
+        @Query("lon") lon: Double,
+        @Query("radius") radiusKm: Double
+    ): Response<JsonArray>
+
     /**
      * recommendationId y freeTimeMinutes solo si el usuario se une desde la
      * lista de recomendaciones; desde otro lugar van null y Retrofit los omite.
