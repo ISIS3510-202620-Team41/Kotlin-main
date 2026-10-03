@@ -90,7 +90,8 @@ class ActivityRepository {
                     ),
                     durationMinutes = durationMinutes,
                     distanceMeters = (distanceKm * 1000).toInt(),
-                    score = recommendation.getDouble("score")
+                    score = recommendation.getDouble("score"),
+                    joined = activityJson.optBoolean("joined", false)
                 )
             )
         }
@@ -105,6 +106,39 @@ class ActivityRepository {
             "CULTURA" -> "Cultural"
             "ENTRETENIMIENTO" -> "Entretenimiento"
             else -> category
+        }
+    }
+    fun joinActivity(
+        accessToken: String,
+        activityId: String
+    ) {
+        val url = URL("$baseUrl/api/activities/$activityId/join")
+
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "POST"
+
+            connection.setRequestProperty(
+                "Authorization",
+                "Bearer $accessToken"
+            )
+
+            connection.setRequestProperty(
+                "Accept",
+                "application/json"
+            )
+
+            val responseCode = connection.responseCode
+
+            if (responseCode !in 200..299) {
+                throw Exception(
+                    "Join failed with HTTP $responseCode"
+                )
+            }
+
+        } finally {
+            connection.disconnect()
         }
     }
 }

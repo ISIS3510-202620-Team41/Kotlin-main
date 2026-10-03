@@ -57,4 +57,30 @@ class RecommendationsViewModel : ViewModel() {
     fun updatePreferences(categories: Set<String>) {
         preferencesRepository.updatePreferences(categories)
     }
+
+    fun joinActivity(
+        accessToken: String,
+        activityId: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        Thread {
+            try {
+                activityRepository.joinActivity(
+                    accessToken = accessToken,
+                    activityId = activityId
+                )
+
+                mainHandler.post {
+                    onSuccess()
+                }
+
+            } catch (e: Exception) {
+                mainHandler.post {
+                    onError(e.message ?: "Unknown error")
+                }
+            }
+        }.start()
+    }
+
 }

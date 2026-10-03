@@ -249,7 +249,11 @@ fun RecommendationScreen(
             }
 
             items(recommendations) { activity ->
-                RecommendationCard(activity)
+                RecommendationCard(
+                    activity = activity,
+                    accessToken = accessToken,
+                    viewModel = viewModel
+                )
             }
 
             item {
@@ -260,7 +264,23 @@ fun RecommendationScreen(
 }
 
 @Composable
-fun RecommendationCard(activity: Activity) {
+fun RecommendationCard(
+    activity: Activity,
+    accessToken: String,
+    viewModel: RecommendationsViewModel
+) {
+
+    var joined by remember(activity.id) {
+        mutableStateOf(activity.joined)
+    }
+
+    var isJoining by remember(activity.id) {
+        mutableStateOf(false)
+    }
+
+    var joinError by remember(activity.id) {
+        mutableStateOf<String?>(null)
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -284,16 +304,64 @@ fun RecommendationCard(activity: Activity) {
 
             Text(
                 text = activity.category,
+                fontSize = 16.sp,
                 color = Color(0xFFD50057),
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
                 text = "${activity.durationMinutes} min · ${activity.distanceMeters} m",
+                fontSize = 16.sp,
                 color = Color.DarkGray
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+
+            Button(
+                onClick = {
+                    isJoining = true
+                    joinError = null
+
+                    viewModel.joinActivity(
+                        accessToken = accessToken,
+                        activityId = activity.id,
+
+                        onSuccess = {
+                            joined = true
+                            isJoining = false
+                        },
+
+                        onError = { error ->
+                            joinError = error
+                            isJoining = false
+                        }
+                    )
+                },
+
+                enabled = !joined && !isJoining,
+
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = when {
+                        joined -> "Unido ✓"
+                        isJoining -> "Uniéndome..."
+                        else -> "Unirme"
+                    }
+                )
+            }
+
+            joinError?.let { error ->
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Error: $error",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }
