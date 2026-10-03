@@ -11,6 +11,7 @@ import okhttp3.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 object ApiClient {
     val BASE_URL: String = BuildConfig.API_BASE_URL
@@ -31,7 +32,7 @@ object ApiClient {
             .build()
             .create(ApiService::class.java)
 
-        val client = OkHttpClient.Builder()
+        val client = OkHttpClient.Builder().readTimeout(60, TimeUnit.SECONDS)
             // Agrega "Authorization: Bearer <token>" a todas las peticiones
             .addInterceptor { chain ->
                 val builder = chain.request().newBuilder()
