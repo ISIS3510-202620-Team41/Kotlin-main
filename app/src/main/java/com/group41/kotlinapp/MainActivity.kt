@@ -128,7 +128,44 @@ fun RecommendationScreen(
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 )
 
-                Spacer(modifier = Modifier.height(28.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent(context, ProfileActivity::class.java)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = LlamallaBlue,
+                            contentColor = LlamallaBlack
+                        )
+                    ) {
+                        Text("Perfil")
+                    }
+
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent(context, NearbyMeetingPointActivity::class.java)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = LlamallaBlue,
+                            contentColor = LlamallaBlack
+                        )
+                    ) {
+                        Text("Cercanas")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
 
                 Text(
                     text = "Tus preferencias",
