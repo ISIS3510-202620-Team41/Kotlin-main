@@ -72,6 +72,21 @@ interface ApiService {
         @Query("recommendationId") recommendationId: String? = null,
         @Query("freeTimeMinutes") freeTimeMinutes: Int? = null
     ): JsonObject
+
+    @POST("api/schedules/sync/google")
+    suspend fun syncGoogle(
+        @Body body: GoogleSyncRequest,
+        @Query("tz") tz: String = TimeZone.getDefault().id
+    ): SyncResult
+
+    @POST("api/schedules/sync/google/refresh")
+    suspend fun refreshGoogle(@Query("tz") tz: String = TimeZone.getDefault().id): SyncResult
+
+    @GET("api/schedules/me/gaps")
+    suspend fun myGaps(
+        @Query("date") date: String,
+        @Query("tz") tz: String = TimeZone.getDefault().id
+    ): GapsResponse
 }
 
 /** Una carga de recomendaciones con el id que el backend le asignó. */

@@ -19,6 +19,11 @@ class TokenStore(context: Context) {
         get() = prefs.getString("user_id", null)
         set(value) = prefs.edit { putString("user_id", value) }
 
+    /** El servidor guarda el token de Google; aquí solo la bandera para la UI */
+    var googleConnected: Boolean
+        get() = prefs.getBoolean("google_connected", false)
+        set(value) = prefs.edit { putBoolean("google_connected", value) }
+
     fun save(response: AuthResponse) {
         access = response.accessToken
         refresh = response.refreshToken

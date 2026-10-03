@@ -25,6 +25,11 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"${prop("apiBaseUrl", "http://10.0.2.2:8080/")}\"")
         buildConfigField("String", "ANALYTICS_URL", "\"${prop("analyticsUrl", "http://10.0.2.2:8000")}\"")
         buildConfigField("String", "ANALYTICS_INGEST_KEY", "\"${prop("analyticsIngestKey", "")}\"")
+        buildConfigField(
+            "String",
+            "GOOGLE_SERVER_CLIENT_ID",
+            "\"1017192596725-lmojsc9ltj2vib775hc9v9ngcn18kmls.apps.googleusercontent.com\""
+        )
     }
 
     buildTypes {
@@ -73,5 +78,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
     // Tests de los ViewModel: misma versión de corrutinas que trae el proyecto
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    implementation(libs.play.services.auth)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

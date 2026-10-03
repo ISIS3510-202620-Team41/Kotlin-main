@@ -1,5 +1,9 @@
 package com.group41.kotlinapp.network
 
+data class GoogleSyncRequest(val authCode: String)
+data class SyncResult(val imported: Int, val skippedEvents: Int, val calendars: Int)
+data class FreeSlotDto(val start: String, val end: String)
+data class GapsResponse(val date: String, val timezone: String, val free: List<FreeSlotDto>)
 data class LoginRequest(val email: String, val password: String)
 data class RegisterRequest(val email: String, val password: String, val name: String)
 data class RefreshRequest(val refreshToken: String)
