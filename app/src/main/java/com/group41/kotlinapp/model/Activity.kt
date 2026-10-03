@@ -6,5 +6,6 @@ data class Activity(
     val category: String,
     val durationMinutes: Int,
     val distanceMeters: Int,
-    val score: Double = 0.0
+    val score: Double = 0.0,
+    val joined: Boolean = false
 )

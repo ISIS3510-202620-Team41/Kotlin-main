@@ -40,6 +40,11 @@ import androidx.lifecycle.ViewModelProvider
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.viewmodel.RecommendationsViewModel
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
+import com.group41.kotlinapp.ui.theme.LlamallaBlue
+import com.group41.kotlinapp.ui.theme.LlamallaRose
+import com.group41.kotlinapp.ui.theme.LlamallaBlack
 
 class MainActivity : ComponentActivity() {
 
@@ -68,6 +73,8 @@ fun RecommendationScreen(
     viewModel: RecommendationsViewModel,
     accessToken: String
 ) {
+
+    val context = LocalContext.current
 
     var selectedCategories by remember {
         mutableStateOf(setOf<String>())
@@ -117,7 +124,7 @@ fun RecommendationScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .background(
-                            color = Color(0xFF87D0E0),
+                            color = LlamallaBlue,
                             shape = RoundedCornerShape(10.dp)
                         )
                         .padding(horizontal = 14.dp, vertical = 8.dp)
@@ -215,7 +222,7 @@ fun RecommendationScreen(
                     shape = RoundedCornerShape(18.dp),
 
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFD50057)
+                        containerColor = LlamallaRose
                     )
                 ) {
                     Text(
@@ -238,6 +245,25 @@ fun RecommendationScreen(
                     )
                 }
 
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = {
+                        val intent = Intent(
+                            context,
+                            NearbyMeetingPointActivity::class.java
+                        )
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LlamallaBlue,
+                        contentColor = LlamallaBlack
+                    )
+                ) {
+                    Text("Buscar por punto de encuentro")
+                }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
@@ -284,7 +310,7 @@ fun RecommendationCard(activity: Activity) {
 
             Text(
                 text = activity.category,
-                color = Color(0xFFD50057),
+                color = LlamallaRose,
                 fontWeight = FontWeight.SemiBold
             )
 

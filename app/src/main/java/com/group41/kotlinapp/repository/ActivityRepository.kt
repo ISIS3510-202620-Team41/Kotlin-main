@@ -107,4 +107,94 @@ class ActivityRepository {
             else -> category
         }
     }
+
+    fun getNearbyActivities(
+        accessToken: String,
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double = 1.0
+    ): List<Activity> {
+
+        val url = URL(
+            "$baseUrl/api/activities" +
+                    "?lat=$latitude&lon=$longitude&radius=$radiusKm"
+        )
+
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "GET"
+
+            connection.setRequestProperty(
+                "Authorization",
+                "Bearer $accessToken"
+            )
+
+            connection.setRequestProperty(
+                "Accept",
+                "application/json"
+            )
+
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                throw Exception(
+                    "Backend returned HTTP ${connection.responseCode}"
+                )
+            }
+
+            val response = connection.inputStream
+                .bufferedReader()
+                .use { it.readText() }
+
+            return parseNearbyActivities(response)
+
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun parseNearbyActivities(json: String): List<Activity> {
+        val array = JSONArray(json)
+        val activities = mutableListOf<Activity>()
+
+        for (i in 0 until array.length()) {
+            val activityJson = array.getJSONObject(i)
+
+            val start = OffsetDateTime.parse(
+                activityJson.getString("startTime")
+            )
+
+            val end = OffsetDateTime.parse(
+                activityJson.getString("endTime")
+            )
+
+            val durationMinutes = ChronoUnit.MINUTES.between(
+                start,
+                end
+            ).toInt()
+
+            val distanceKm =
+                if (activityJson.isNull("distanceKm")) {
+                    0.0
+                } else {
+                    activityJson.getDouble("distanceKm")
+                }
+
+            activities.add(
+                Activity(
+                    id = activityJson.getString("id"),
+                    name = activityJson.getString("title"),
+                    category = formatCategory(
+                        activityJson.getString("category")
+                    ),
+                    durationMinutes = durationMinutes,
+                    distanceMeters = (distanceKm * 1000).toInt(),
+                    joined = activityJson.optBoolean("joined", false)
+                )
+            )
+        }
+
+        return activities
+    }
+
+
 }

@@ -40,6 +40,11 @@
             android:name=".CreateActivityStep3Activity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".NearbyMeetingPointActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KotlinApp"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>
