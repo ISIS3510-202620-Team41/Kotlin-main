@@ -1,5 +1,6 @@
 package com.group41.kotlinapp
 
+import android.content.ActivityNotFoundException
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -16,14 +17,16 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.group41.kotlinapp.network.UserDto
 import com.group41.kotlinapp.viewmodel.ProfileEvent
 import com.group41.kotlinapp.viewmodel.ProfileUiState
 import com.group41.kotlinapp.viewmodel.ProfileViewModel
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
- * Editar perfil: foto (galería o URL), nombre y descripción.
+ * Editar perfil: foto (cámara, galería o URL), nombre y descripción.
  *
  * Usa el ProfileViewModel de ProfileActivity: lo que cambia aquí se ve al
  * instante en el perfil, y una subida en curso no se corta al rotar.
@@ -55,6 +58,47 @@ class EditProfileBottomSheet : BottomSheetDialogFragment() {
         // Contexto de la app, no del fragment: la lectura puede seguir tras rotar
         val appContext = requireContext().applicationContext
         viewModel.uploadAvatar { AvatarImage.fromUri(appContext, uri) }
+    }
+
+    /**
+     * Archivo donde la cámara está guardando la foto. Se guarda en el estado
+     * porque mientras la cámara está abierta Android puede destruir esta
+     * pantalla (al rotar o por falta de memoria) y al volver hay que saber cuál era.
+     */
+    private var pendingPhoto: File? = null
+
+    /**
+     * Abre la app de cámara del sistema. No pide el permiso CAMERA: la foto la
+     * toma la app de cámara y la escribe en el archivo que le pasamos.
+     */
+    private val takePhoto = registerForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        val file = pendingPhoto ?: return@registerForActivityResult
+        pendingPhoto = null
+        if (!saved) {
+            // Cerró la cámara sin tomar la foto
+            file.delete()
+            return@registerForActivityResult
+        }
+        val appContext = requireContext().applicationContext
+        val uri = AvatarImage.uriFor(appContext, file)
+        viewModel.uploadAvatar {
+            // Ya convertida a JPEG en memoria, el archivo temporal sobra
+            try {
+                AvatarImage.fromUri(appContext, uri)
+            } finally {
+                file.delete()
+            }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        pendingPhoto = savedInstanceState?.getString(KEY_PENDING_PHOTO)?.let(::File)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingPhoto?.let { outState.putString(KEY_PENDING_PHOTO, it.absolutePath) }
     }
 
     override fun onCreateView(
@@ -90,10 +134,8 @@ class EditProfileBottomSheet : BottomSheetDialogFragment() {
 
         view.findViewById<View>(R.id.btn_close).setOnClickListener { dismiss() }
 
-        uploadButton.setOnClickListener {
-            pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-        }
-        // Tocar la foto también abre la galería
+        uploadButton.setOnClickListener { choosePhotoSource() }
+        // Tocar la foto también abre las opciones
         avatarInitials.setOnClickListener { uploadButton.performClick() }
         avatarImage.setOnClickListener { uploadButton.performClick() }
 
@@ -108,6 +150,34 @@ class EditProfileBottomSheet : BottomSheetDialogFragment() {
                 launch { viewModel.state.collect(::render) }
                 launch { viewModel.events.collect(::onEvent) }
             }
+        }
+    }
+
+    private fun choosePhotoSource() {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Foto de perfil")
+            .setItems(arrayOf("Tomar foto", "Elegir de la galería")) { _, which ->
+                when (which) {
+                    0 -> openCamera()
+                    else -> pickPhoto.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }
+            }
+            .show()
+    }
+
+    private fun openCamera() {
+        val context = requireContext()
+        val file = AvatarImage.newCameraFile(context)
+        pendingPhoto = file
+        try {
+            takePhoto.launch(AvatarImage.uriFor(context, file))
+        } catch (e: ActivityNotFoundException) {
+            // Teléfono sin app de cámara (pasa en algunos emuladores)
+            pendingPhoto = null
+            file.delete()
+            Toast.makeText(context, "No hay una app de cámara disponible", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -152,5 +222,6 @@ class EditProfileBottomSheet : BottomSheetDialogFragment() {
 
     companion object {
         const val TAG = "EditProfileBottomSheet"
+        private const val KEY_PENDING_PHOTO = "pendingPhoto"
     }
 }

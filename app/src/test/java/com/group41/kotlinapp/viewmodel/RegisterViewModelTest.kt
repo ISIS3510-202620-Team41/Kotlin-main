@@ -42,6 +42,15 @@ class RegisterViewModelTest {
     }
 
     @Test
+    fun `registro con Google no necesita formulario`() {
+        viewModel.registerWithGoogle("id-token-de-google")
+
+        assertTrue(viewModel.state.value.registered)
+        assertEquals("id-token-de-google", auth.googleTokens.single())
+        assertTrue(auth.registrations.isEmpty())
+    }
+
+    @Test
     fun `correo ya registrado marca el campo de correo`() {
         auth.failure = httpError(409, "Ese correo ya esta registrado")
 

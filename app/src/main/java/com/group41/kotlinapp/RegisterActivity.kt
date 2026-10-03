@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -32,6 +31,7 @@ class RegisterActivity : AppCompatActivity() {
     private lateinit var etPassword: TextInputEditText
     private lateinit var tvError: TextView
     private lateinit var btnRegister: MaterialButton
+    private lateinit var btnGoogle: MaterialButton
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,9 +59,8 @@ class RegisterActivity : AppCompatActivity() {
             } else false
         }
 
-        findViewById<MaterialButton>(R.id.btn_google).setOnClickListener {
-            Toast.makeText(this, "Disponible pronto", Toast.LENGTH_SHORT).show()
-        }
+        btnGoogle = findViewById(R.id.btn_google)
+        btnGoogle.setOnClickListener { registerWithGoogle() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -78,6 +77,19 @@ class RegisterActivity : AppCompatActivity() {
         )
     }
 
+    /** Pide la cuenta a Google (necesita la Activity) y le pasa el token al ViewModel */
+    private fun registerWithGoogle() {
+        lifecycleScope.launch {
+            try {
+                viewModel.registerWithGoogle(GoogleSignIn.requestIdToken(this@RegisterActivity))
+            } catch (e: GoogleSignInCancelled) {
+                // Cerró el selector de cuentas: no pasa nada
+            } catch (e: GoogleSignInException) {
+                viewModel.showError(e.message.orEmpty())
+            }
+        }
+    }
+
     private fun render(state: RegisterUiState) {
         if (state.registered) {
             openHome()
@@ -89,6 +101,7 @@ class RegisterActivity : AppCompatActivity() {
         tvError.text = state.error
         tvError.isVisible = state.error != null
         btnRegister.isEnabled = !state.loading
+        btnGoogle.isEnabled = !state.loading
         btnRegister.text = if (state.loading) "Creando perfil..." else "Crear perfil"
     }
 }

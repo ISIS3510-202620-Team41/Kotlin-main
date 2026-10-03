@@ -12,6 +12,7 @@ import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
 import coil.load
+import androidx.core.content.FileProvider
 import coil.transform.CircleCropTransformation
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.network.UserDto
@@ -21,6 +22,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
@@ -47,7 +49,20 @@ object AvatarImage {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    /** Imagen elegida de la galería. Llamar fuera del hilo principal. */
+    /**
+     * Archivo vacío donde la app de cámara guarda la foto. Va en la caché:
+     * se borra apenas se sube, y si algo falla Android lo limpia solo.
+     */
+    fun newCameraFile(context: Context): File {
+        val dir = File(context.cacheDir, "camera").apply { mkdirs() }
+        return File(dir, "avatar_${System.currentTimeMillis()}.jpg")
+    }
+
+    /** Uri content:// que la app de cámara puede escribir (ver FileProvider en el manifest) */
+    fun uriFor(context: Context, file: File): Uri =
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+
+    /** Imagen elegida de la galería o tomada con la cámara. Llamar fuera del hilo principal. */
     fun fromUri(context: Context, uri: Uri): ByteArray {
         val bitmap = if (Build.VERSION.SDK_INT >= 28) {
             // ImageDecoder aplica la rotación del EXIF: sin esto las fotos de

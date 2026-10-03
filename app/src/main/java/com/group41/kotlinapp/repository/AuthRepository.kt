@@ -2,6 +2,7 @@ package com.group41.kotlinapp.repository
 
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.network.ApiService
+import com.group41.kotlinapp.network.GoogleLoginRequest
 import com.group41.kotlinapp.network.LoginRequest
 import com.group41.kotlinapp.network.RegisterRequest
 import com.group41.kotlinapp.network.UserDto
@@ -16,6 +17,9 @@ interface AuthRepository {
     fun hasSession(): Boolean
     suspend fun login(email: String, password: String): UserDto
     suspend fun register(name: String, email: String, password: String): UserDto
+
+    /** `idToken` = el que entrega Google al elegir la cuenta (ver GoogleSignIn) */
+    suspend fun loginWithGoogle(idToken: String): UserDto
     suspend fun logout()
 
     /** La sesión venció y el refresh ya no sirve: se borra sin llamar al backend */
@@ -38,6 +42,13 @@ class ApiAuthRepository(
     override suspend fun register(name: String, email: String, password: String): UserDto {
         val response = api.register(RegisterRequest(email, password, name))
         // El registro ya deja la sesión iniciada
+        ApiClient.onAuthenticated(response)
+        return response.user
+    }
+
+    override suspend fun loginWithGoogle(idToken: String): UserDto {
+        // El backend verifica el token con Google; si el correo no existe crea la cuenta
+        val response = api.google(GoogleLoginRequest(idToken))
         ApiClient.onAuthenticated(response)
         return response.user
     }

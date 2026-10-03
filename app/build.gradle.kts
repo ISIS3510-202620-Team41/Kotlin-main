@@ -25,6 +25,9 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"${prop("apiBaseUrl", "http://10.0.2.2:8080/")}\"")
         buildConfigField("String", "ANALYTICS_URL", "\"${prop("analyticsUrl", "http://10.0.2.2:8000")}\"")
         buildConfigField("String", "ANALYTICS_INGEST_KEY", "\"${prop("analyticsIngestKey", "")}\"")
+        // Client ID de tipo "Aplicación web" de Google Cloud: el mismo GOOGLE_CLIENT_ID
+        // del backend. Sin él, "Continuar con Google" avisa que no está configurado.
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${prop("googleWebClientId", "")}\"")
     }
 
     buildTypes {
@@ -70,6 +73,10 @@ dependencies {
     implementation("io.coil-kt:coil:2.7.0")
     // ViewModel + viewModelScope (la misma versión de lifecycle que ya usa el proyecto)
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
+    // Login con Google: Credential Manager (reemplaza a GoogleSignInClient, deprecado)
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     // Tests de los ViewModel: misma versión de corrutinas que trae el proyecto
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

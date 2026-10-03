@@ -61,4 +61,24 @@ class RegisterViewModel(
             }
         }
     }
+
+    /** Con Google no hay formulario: el backend crea la cuenta con el nombre y correo de Google */
+    fun registerWithGoogle(idToken: String) {
+        if (_state.value.loading) return
+        _state.update { RegisterUiState(loading = true) }
+        viewModelScope.launch {
+            try {
+                auth.loginWithGoogle(idToken)
+                _state.update { it.copy(loading = false, registered = true) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(loading = false, error = googleLoginMessage(e)) }
+            }
+        }
+    }
+
+    fun showError(message: String) {
+        _state.update { RegisterUiState(error = message) }
+    }
 }

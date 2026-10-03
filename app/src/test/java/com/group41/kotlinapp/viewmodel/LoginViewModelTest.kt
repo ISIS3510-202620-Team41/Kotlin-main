@@ -67,6 +67,42 @@ class LoginViewModelTest {
     }
 
     @Test
+    fun `login con Google manda el token al backend y marca loggedIn`() {
+        viewModel.loginWithGoogle("id-token-de-google")
+
+        assertTrue(viewModel.state.value.loggedIn)
+        assertEquals("id-token-de-google", auth.googleTokens.single())
+    }
+
+    @Test
+    fun `Google sin configurar en el servidor da un mensaje claro`() {
+        auth.failure = httpError(503, "La autenticacion con Google no esta configurada")
+
+        viewModel.loginWithGoogle("token")
+
+        assertEquals("El inicio con Google no está configurado en el servidor", viewModel.state.value.error)
+        assertFalse(viewModel.state.value.loggedIn)
+    }
+
+    @Test
+    fun `token de Google rechazado pide intentar de nuevo`() {
+        auth.failure = httpError(401, "Token de Google invalido o expirado")
+
+        viewModel.loginWithGoogle("token")
+
+        assertEquals("Google no pudo verificar tu cuenta. Intenta de nuevo", viewModel.state.value.error)
+    }
+
+    @Test
+    fun `correo vinculado a otra cuenta de Google muestra el mensaje del backend`() {
+        auth.failure = httpError(409, "Ese correo ya esta vinculado a otra cuenta de Google")
+
+        viewModel.loginWithGoogle("token")
+
+        assertEquals("Ese correo ya esta vinculado a otra cuenta de Google", viewModel.state.value.error)
+    }
+
+    @Test
     fun `un nuevo intento borra el error anterior`() {
         auth.failure = httpError(401)
         viewModel.login("ana@test.com", "mala")

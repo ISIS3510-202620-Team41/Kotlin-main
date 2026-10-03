@@ -23,6 +23,10 @@ interface ApiService {
     @POST("api/auth/register")
     suspend fun register(@Body body: RegisterRequest): AuthResponse
 
+    /** Crea la cuenta si el correo no existe; si existe, la vincula a Google */
+    @POST("api/auth/google")
+    suspend fun google(@Body body: GoogleLoginRequest): AuthResponse
+
     // Síncrono a propósito: lo usa el refresh automático de ApiClient
     @POST("api/auth/refresh")
     fun refresh(@Body body: RefreshRequest): Call<AuthResponse>
