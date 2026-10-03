@@ -63,14 +63,6 @@ class FakeAuthRepository : AuthRepository {
         return testUser
     }
 
-    val googleTokens = mutableListOf<String>()
-
-    override suspend fun loginWithGoogle(idToken: String): UserDto {
-        googleTokens += idToken
-        failure?.let { throw it }
-        return testUser
-    }
-
     override suspend fun logout() {
         logoutCalls++
     }

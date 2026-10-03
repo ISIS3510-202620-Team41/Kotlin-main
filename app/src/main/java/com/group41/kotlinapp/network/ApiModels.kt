@@ -3,7 +3,6 @@ package com.group41.kotlinapp.network
 data class LoginRequest(val email: String, val password: String)
 data class RegisterRequest(val email: String, val password: String, val name: String)
 data class RefreshRequest(val refreshToken: String)
-data class GoogleLoginRequest(val idToken: String)
 data class UpdateProfileRequest(val name: String?, val bio: String?)
 
 data class UserDto(

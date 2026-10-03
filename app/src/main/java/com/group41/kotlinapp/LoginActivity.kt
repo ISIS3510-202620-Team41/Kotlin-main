@@ -30,7 +30,6 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var etPassword: TextInputEditText
     private lateinit var tvError: TextView
     private lateinit var btnLogin: MaterialButton
-    private lateinit var btnGoogle: MaterialButton
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,8 +67,7 @@ class LoginActivity : AppCompatActivity() {
             startActivity(Intent(this, RegisterActivity::class.java))
         }
 
-        btnGoogle = findViewById(R.id.btn_google)
-        btnGoogle.setOnClickListener { signInWithGoogle() }
+        findViewById<MaterialButton>(R.id.btn_google).setOnClickListener { comingSoon() }
         findViewById<MaterialButton>(R.id.btn_biometric).setOnClickListener { comingSoon() }
 
         // Se redibuja cada vez que cambia el estado; solo mientras la pantalla está visible
@@ -84,19 +82,6 @@ class LoginActivity : AppCompatActivity() {
         viewModel.login(etEmail.text.toString(), etPassword.text.toString())
     }
 
-    /** Pide la cuenta a Google (necesita la Activity) y le pasa el token al ViewModel */
-    private fun signInWithGoogle() {
-        lifecycleScope.launch {
-            try {
-                viewModel.loginWithGoogle(GoogleSignIn.requestIdToken(this@LoginActivity))
-            } catch (e: GoogleSignInCancelled) {
-                // Cerró el selector de cuentas: no pasa nada
-            } catch (e: GoogleSignInException) {
-                viewModel.showError(e.message.orEmpty())
-            }
-        }
-    }
-
     private fun render(state: LoginUiState) {
         if (state.loggedIn) {
             openHome()
@@ -107,7 +92,6 @@ class LoginActivity : AppCompatActivity() {
         tvError.text = state.error
         tvError.isVisible = state.error != null
         btnLogin.isEnabled = !state.loading
-        btnGoogle.isEnabled = !state.loading
         btnLogin.text = if (state.loading) "Ingresando..." else "Iniciar sesión"
     }
 

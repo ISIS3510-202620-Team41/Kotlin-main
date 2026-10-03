@@ -57,25 +57,4 @@ class LoginViewModel(
             }
         }
     }
-
-    /** La pantalla ya obtuvo el idToken de Google; se cambia por una sesión del backend */
-    fun loginWithGoogle(idToken: String) {
-        if (_state.value.loading) return
-        _state.update { LoginUiState(loading = true) }
-        viewModelScope.launch {
-            try {
-                auth.loginWithGoogle(idToken)
-                _state.update { it.copy(loading = false, loggedIn = true) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _state.update { it.copy(loading = false, error = googleLoginMessage(e)) }
-            }
-        }
-    }
-
-    /** Un fallo antes de llegar al backend (ej. no hay cuentas de Google en el teléfono) */
-    fun showError(message: String) {
-        _state.update { LoginUiState(error = message) }
-    }
 }
