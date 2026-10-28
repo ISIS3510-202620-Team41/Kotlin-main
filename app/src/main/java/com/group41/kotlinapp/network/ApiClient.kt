@@ -1,6 +1,11 @@
 package com.group41.kotlinapp.network
 
 import android.content.Context
+import coil.Coil
+import coil.ImageLoader
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
+import java.io.File
 import com.group41.kotlinapp.BuildConfig
 import com.group41.kotlinapp.analytics.Analytics
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -23,6 +28,22 @@ object ApiClient {
 
     fun init(context: Context) {
         tokens = TokenStore(context.applicationContext)
+        // Configuración de Coil para caché de imágenes en memoria y disco (25 MB)
+        val coilLoader = ImageLoader.Builder(context.applicationContext)
+            .memoryCache {
+                MemoryCache.Builder(context.applicationContext)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(File(context.applicationContext.cacheDir, "image_cache"))
+                    .maxSizeBytes(25L * 1024 * 1024)
+                    .build()
+            }
+            .crossfade(true)
+            .build()
+        Coil.setImageLoader(coilLoader)
         val gson = GsonConverterFactory.create()
 
         // Cliente sin token ni authenticator, solo para refrescar (evita bucles)
