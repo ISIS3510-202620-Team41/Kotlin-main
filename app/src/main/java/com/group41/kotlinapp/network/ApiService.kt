@@ -62,6 +62,13 @@ interface ApiService {
         @Query("radius") radiusKm: Double
     ): Response<JsonArray>
 
+    @GET("api/activities/{id}")
+    suspend fun getActivity(
+        @Path("id") activityId: String,
+        @Query("lat") lat: Double? = null,
+        @Query("lon") lon: Double? = null
+    ): Response<JsonObject>
+
     /**
      * recommendationId y freeTimeMinutes solo si el usuario se une desde la
      * lista de recomendaciones; desde otro lugar van null y Retrofit los omite.

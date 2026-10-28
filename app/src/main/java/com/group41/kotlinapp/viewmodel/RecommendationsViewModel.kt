@@ -3,14 +3,23 @@ package com.group41.kotlinapp.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.group41.kotlinapp.model.Activity
+import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.repository.ActivityRepository
 import com.group41.kotlinapp.repository.PreferencesRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class RecommendationsViewModel : ViewModel() {
 
     private val activityRepository = ActivityRepository()
     private val preferencesRepository = PreferencesRepository()
+
+    private val _isOffline = MutableStateFlow(false)
+    val isOffline: StateFlow<Boolean> = _isOffline.asStateFlow()
 
     fun loadRecommendedActivities(
         latitude: Double,
@@ -21,6 +30,9 @@ class RecommendationsViewModel : ViewModel() {
     ) {
         viewModelScope.launch {
             try {
+                val online = try { ApiClient.isOnline() } catch (_: Exception) { true }
+                _isOffline.value = !online
+
                 val activities = activityRepository.getRecommendedActivities(
                     latitude = latitude,
                     longitude = longitude,
@@ -38,10 +50,28 @@ class RecommendationsViewModel : ViewModel() {
                         }
                     }
 
-                onSuccess(orderedActivities)
+                withContext(Dispatchers.Main) {
+                    onSuccess(orderedActivities)
+                }
 
             } catch (e: Exception) {
-                onError(e.message ?: "Unknown error")
+                withContext(Dispatchers.Main) {
+                    onError(e.message ?: "Error al cargar recomendaciones")
+                }
+            }
+        }
+    }
+
+    fun getActivityById(
+        activityId: String,
+        latitude: Double? = null,
+        longitude: Double? = null,
+        onResult: (Activity?) -> Unit
+    ) {
+        viewModelScope.launch {
+            val act = activityRepository.getActivityById(activityId, latitude, longitude)
+            withContext(Dispatchers.Main) {
+                onResult(act)
             }
         }
     }
@@ -62,11 +92,14 @@ class RecommendationsViewModel : ViewModel() {
                     recommendationId = activity.recommendationId,
                     freeTimeMinutes = activity.freeTimeMinutes
                 )
-                onSuccess()
+                withContext(Dispatchers.Main) {
+                    onSuccess()
+                }
             } catch (e: Exception) {
-                onError(e.message ?: "Unknown error")
+                withContext(Dispatchers.Main) {
+                    onError(e.message ?: "Error al unirse a la actividad")
+                }
             }
         }
     }
-
 }
