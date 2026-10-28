@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.google.devtools.ksp)
 }
 
 android {
@@ -81,4 +82,6 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     implementation(libs.play.services.auth)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    implementation(libs.room.runtime)
+    ksp(libs.room.compiler)
 }
