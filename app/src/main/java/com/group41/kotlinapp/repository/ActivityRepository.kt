@@ -1,10 +1,14 @@
 package com.group41.kotlinapp.repository
 
 import com.group41.kotlinapp.cache.ActivityMemoryCache
+import com.group41.kotlinapp.data.local.dao.ActivityDao
+import com.group41.kotlinapp.data.local.toActivity
+import com.group41.kotlinapp.data.local.toEntity
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.network.RecommendationsPage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -16,20 +20,24 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Repositorio de Actividades con soporte para Conectividad Eventual y Caché.
+ * Repositorio de Actividades con soporte para Conectividad Eventual, Caché en Memoria y Persistencia en Room.
  *
  * Aplica los principios de la rúbrica de sustentación:
- * 1. Estrategia Cache-First: Almacena en la caché en memoria (ActivityMemoryCache)
- *    todas las actividades consultadas. Si la red falla o está en modo offline,
- *    recupera inmediatamente las actividades de la memoria/disco.
+ * 1. Estrategia Cache-First & Persistencia Local: Guarda respuestas de la red en la caché LRU (memoria)
+ *    y en el DAO de Room (disco). Si el proceso se reinicia o no hay red, lee desde la base de datos local.
  * 2. Cálculo Local de Distancia (Haversine): Cuando el dispositivo está sin conexión,
- *    calcula la distancia exacta en metros entre el GPS del usuario y las coordenadas
- *    guardadas de la actividad sin depender del backend.
- * 3. Ejecución Multi-hilo: Todo el procesamiento pesado de parseo JSON y cálculo
- *    matemático se delega a Dispatchers.IO para no congelar la interfaz de usuario.
+ *    calcula la distancia exacta en metros entre el GPS del usuario y las coordenadas guardadas.
+ * 3. Ejecución Multi-hilo: Delegado a Dispatchers.IO para mantener la UI fluida.
+ *
+ * @param activityDao Data Access Object for Room database interactions.
  */
-class ActivityRepository {
+class ActivityRepository(
+    private val activityDao: ActivityDao? = null
+) {
 
+    /**
+     * Une al usuario a una actividad en el backend y actualiza la caché local (memoria y disco).
+     */
     suspend fun joinActivity(
         activityId: String,
         recommendationId: String?,
@@ -40,14 +48,24 @@ class ActivityRepository {
             recommendationId,
             freeTimeMinutes
         )
-        // Actualizar estado en la caché en memoria
-        ActivityMemoryCache.get(activityId)?.let { current ->
-            ActivityMemoryCache.put(current.copy(joined = true))
+
+        val memoryActivity = ActivityMemoryCache.get(activityId)
+        if (memoryActivity != null) {
+            val updated = memoryActivity.copy(joined = true)
+            ActivityMemoryCache.put(updated)
+            activityDao?.insertActivity(updated.toEntity())
+        } else {
+            val storedEntity = activityDao?.getActivityById(activityId)
+            if (storedEntity != null) {
+                val updated = storedEntity.toActivity().copy(joined = true)
+                ActivityMemoryCache.put(updated)
+                activityDao?.insertActivity(updated.toEntity())
+            }
         }
     }
 
     /**
-     * Consulta recomendaciones aplicando estrategia Cache-First.
+     * Consulta recomendaciones aplicando estrategia Cache-First con respaldo en Room.
      */
     suspend fun getRecommendedActivities(
         latitude: Double,
@@ -62,8 +80,7 @@ class ActivityRepository {
             )
 
             if (!response.isSuccessful) {
-                // Si la red responde error, intentar servir desde la caché en memoria
-                val cached = getCachedWithUpdatedDistances(latitude, longitude)
+                val cached = getCachedWithUpdatedDistances(latitude, longitude, radiusKm)
                 if (cached.isNotEmpty()) return@withContext cached
                 throw Exception("Backend returned HTTP ${response.code()}")
             }
@@ -77,16 +94,50 @@ class ActivityRepository {
                 userLon = longitude
             )
 
-            // Guardar en la caché en memoria LRU
             ActivityMemoryCache.putAll(activities)
+            activityDao?.insertActivities(activities.map { it.toEntity() })
 
             activities
         } catch (e: Exception) {
-            // Modo sin conexión: recuperar actividades en memoria o de caché local
-            val cached = getCachedWithUpdatedDistances(latitude, longitude)
+            val cached = getCachedWithUpdatedDistances(latitude, longitude, radiusKm)
             if (cached.isNotEmpty()) {
                 return@withContext cached
             }
+            throw e
+        }
+    }
+
+    /**
+     * Obtiene actividades cercanas persistiéndolas localmente para uso offline.
+     */
+    suspend fun getNearbyActivities(
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double = 1.0
+    ): List<Activity> = withContext(Dispatchers.IO) {
+        try {
+            val response = ApiClient.api.nearbyActivities(
+                lat = latitude,
+                lon = longitude,
+                radiusKm = radiusKm
+            )
+
+            if (!response.isSuccessful) {
+                val cached = getCachedWithUpdatedDistances(latitude, longitude, radiusKm)
+                if (cached.isNotEmpty()) return@withContext cached
+                throw Exception("Backend returned HTTP ${response.code()}")
+            }
+
+            val json = response.body()?.toString() ?: "[]"
+            val activities = parseNearbyActivities(json, userLat = latitude, userLon = longitude)
+
+            ActivityMemoryCache.putAll(activities)
+            activityDao?.insertActivities(activities.map { it.toEntity() })
+
+            activities
+        } catch (e: Exception) {
+            val cached = getCachedWithUpdatedDistances(latitude, longitude, radiusKm)
+            if (cached.isNotEmpty()) return@withContext cached
             throw e
         }
     }
@@ -99,54 +150,80 @@ class ActivityRepository {
         userLat: Double? = null,
         userLon: Double? = null
     ): Activity? = withContext(Dispatchers.IO) {
-        // 1. Primero intentar leer de la caché en memoria LRU
         ActivityMemoryCache.get(activityId)?.let { cached ->
-            return@withContext if (userLat != null && userLon != null && cached.latitude != 0.0) {
-                val distMeters = calculateHaversineDistanceMeters(userLat, userLon, cached.latitude, cached.longitude)
-                cached.copy(distanceMeters = distMeters)
-            } else {
-                cached
-            }
+            return@withContext formatDistance(cached, userLat, userLon)
         }
 
-        // 2. Si no está en memoria, consultar la API (que utiliza la caché HTTP de OkHttp)
         try {
             val response = ApiClient.api.getActivity(activityId, userLat, userLon)
             if (response.isSuccessful && response.body() != null) {
                 val jsonObject = JSONObject(response.body().toString())
                 val activity = parseSingleActivity(jsonObject, userLat = userLat, userLon = userLon)
+
                 ActivityMemoryCache.put(activity)
+                activityDao?.insertActivity(activity.toEntity())
+
                 return@withContext activity
             }
         } catch (_: Exception) {
-            // Ignorar para intentar fallback
+            // Ignore network errors to proceed to local fallback
         }
 
-        // 3. Fallback: buscar entre cualquier actividad de la sesión
+        activityDao?.getActivityById(activityId)?.toActivity()?.let { storedActivity ->
+            ActivityMemoryCache.put(storedActivity)
+            return@withContext formatDistance(storedActivity, userLat, userLon)
+        }
+
         ActivityMemoryCache.snapshot().firstOrNull { it.id == activityId }
     }
 
     /**
-     * Retorna la lista en caché recalculando las distancias localmente al punto actual.
+     * Retorna las actividades en caché recalculando las distancias localmente y filtrando por radio.
+     * Si la memoria está vacía, rehidrata los datos guardados en Room.
      */
-    private fun getCachedWithUpdatedDistances(userLat: Double, userLon: Double): List<Activity> {
-        val cached = ActivityMemoryCache.snapshot()
+    private suspend fun getCachedWithUpdatedDistances(
+        userLat: Double,
+        userLon: Double,
+        radiusKm: Double? = null
+    ): List<Activity> {
+        var cached = ActivityMemoryCache.snapshot()
+
+        if (cached.isEmpty() && activityDao != null) {
+            val dbEntities = activityDao.getAllActivities().first()
+            if (dbEntities.isNotEmpty()) {
+                val mappedDomain = dbEntities.map { it.toActivity() }
+                ActivityMemoryCache.putAll(mappedDomain)
+                cached = mappedDomain
+            }
+        }
+
         if (cached.isEmpty()) return emptyList()
 
-        return cached.map { act ->
+        return cached.mapNotNull { act ->
             if (act.latitude != 0.0 && act.longitude != 0.0) {
-                val newDistance = calculateHaversineDistanceMeters(userLat, userLon, act.latitude, act.longitude)
-                act.copy(distanceMeters = newDistance)
+                val newDistanceMeters = calculateHaversineDistanceMeters(userLat, userLon, act.latitude, act.longitude)
+                val distanceKm = newDistanceMeters / 1000.0
+
+                if (radiusKm == null || distanceKm <= radiusKm) {
+                    act.copy(distanceMeters = newDistanceMeters)
+                } else {
+                    null
+                }
             } else {
-                act
+                if (radiusKm == null) act else null
             }
         }
     }
 
-    /**
-     * Fórmula de Haversine para calcular la distancia en metros entre dos coordenadas.
-     * Permite que la app calcule distancias precisas 100% offline.
-     */
+    private fun formatDistance(activity: Activity, userLat: Double?, userLon: Double?): Activity {
+        return if (userLat != null && userLon != null && activity.latitude != 0.0) {
+            val distMeters = calculateHaversineDistanceMeters(userLat, userLon, activity.latitude, activity.longitude)
+            activity.copy(distanceMeters = distMeters)
+        } else {
+            activity
+        }
+    }
+
     fun calculateHaversineDistanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Int {
         if (lat1 == 0.0 && lon1 == 0.0 || lat2 == 0.0 && lon2 == 0.0) return 0
         val earthRadiusKm = 6371.0
@@ -189,36 +266,6 @@ class ActivityRepository {
         return activities
     }
 
-    suspend fun getNearbyActivities(
-        latitude: Double,
-        longitude: Double,
-        radiusKm: Double = 1.0
-    ): List<Activity> = withContext(Dispatchers.IO) {
-        try {
-            val response = ApiClient.api.nearbyActivities(
-                lat = latitude,
-                lon = longitude,
-                radiusKm = radiusKm
-            )
-
-            if (!response.isSuccessful) {
-                val cached = getCachedWithUpdatedDistances(latitude, longitude)
-                if (cached.isNotEmpty()) return@withContext cached
-                throw Exception("Backend returned HTTP ${response.code()}")
-            }
-
-            val json = response.body()?.toString() ?: "[]"
-            val activities = parseNearbyActivities(json, userLat = latitude, userLon = longitude)
-
-            ActivityMemoryCache.putAll(activities)
-            activities
-        } catch (e: Exception) {
-            val cached = getCachedWithUpdatedDistances(latitude, longitude)
-            if (cached.isNotEmpty()) return@withContext cached
-            throw e
-        }
-    }
-
     private fun parseNearbyActivities(json: String, userLat: Double, userLon: Double): List<Activity> {
         val array = JSONArray(json)
         val activities = mutableListOf<Activity>()
@@ -259,7 +306,6 @@ class ActivityRepository {
         val actLat = activityJson.optDouble("latitude", 0.0)
         val actLon = activityJson.optDouble("longitude", 0.0)
 
-        // Distancia calculada por el backend o localmente vía Haversine si es offline
         val distanceMeters = if (!activityJson.isNull("distanceKm")) {
             (activityJson.getDouble("distanceKm") * 1000).toInt()
         } else if (userLat != null && userLon != null && actLat != 0.0 && actLon != 0.0) {
