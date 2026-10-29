@@ -1,7 +1,9 @@
 package com.group41.kotlinapp.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.group41.kotlinapp.App
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.repository.ActivityRepository
@@ -13,9 +15,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class RecommendationsViewModel : ViewModel() {
+/**
+ * ViewModel responsible for fetching, filtering, and joining recommended activities.
+ * Extends AndroidViewModel to access the Application context and obtain the Room database instance.
+ */
+class RecommendationsViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val activityRepository = ActivityRepository()
+    /**
+     * Initializes ActivityRepository by supplying ActivityDao from the App database singleton.
+     * Casts the Application instance to the app's custom App class to access the shared Room database.
+     */
+    private val activityRepository = ActivityRepository(
+        activityDao = (application as App).database.activityDao()
+    )
     private val preferencesRepository = PreferencesRepository()
 
     private val _isOffline = MutableStateFlow(false)
@@ -30,7 +42,12 @@ class RecommendationsViewModel : ViewModel() {
     ) {
         viewModelScope.launch {
             try {
-                val online = try { ApiClient.isOnline() } catch (_: Exception) { true }
+                // Evaluates device network reachability safely; defaults to false if connectivity check fails
+                val online = try {
+                    ApiClient.isOnline()
+                } catch (_: Exception) {
+                    false
+                }
                 _isOffline.value = !online
 
                 val activities = activityRepository.getRecommendedActivities(

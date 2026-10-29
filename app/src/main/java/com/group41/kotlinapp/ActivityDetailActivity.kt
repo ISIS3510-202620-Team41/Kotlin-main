@@ -30,7 +30,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -45,9 +44,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,12 +67,12 @@ import kotlinx.coroutines.withContext
 /**
  * Vista Protegida 2 — Detalle de Actividad.
  *
- * Cumple con el criterio de Conectividad Eventual de la rúbrica de sustentación (5 pts):
- * - Puede abrirse e inspeccionarse al 100% sin conexión a internet.
- * - Lee primero de la caché en memoria LRU (ActivityMemoryCache) o de la caché HTTP de OkHttp.
- * - Renderiza la foto previamente cacheada en disco con Coil.
- * - Recalcula la distancia localmente mediante la fórmula de Haversine.
- * - Muestra todos los campos del prototipo oficial de Figma (precio, cupos, duración, sobre el lugar).
+ * Cumple con el criterio de Conectividad Eventual:
+ * - Renderiza detalles instantáneamente desde la caché en memoria (Intent / ActivityMemoryCache).
+ * - Carga de forma transparente desde la base de datos local Room si el proceso de la app fue reiniciado.
+ * - Renderiza imágenes en disco previamente descaragas usando Coil.
+ * - Calcula distancias de manera local vía Haversine.
+ * - Solo actualiza el estado local de inscripción ('joined') tras confirmación exitosa de la API.
  */
 class ActivityDetailActivity : ComponentActivity() {
 
@@ -116,6 +115,7 @@ fun ActivityDetailScreen(
     initialActivity: Activity?,
     onBackClick: () -> Unit
 ) {
+    // 1. In-Memory Fast Path: Fast initial state hydration from Intent extras or LRU memory cache
     var activity by remember { mutableStateOf(initialActivity ?: ActivityMemoryCache.get(activityId)) }
     var isLoading by remember { mutableStateOf(activity == null) }
     var isJoining by remember { mutableStateOf(false) }
@@ -123,12 +123,19 @@ fun ActivityDetailScreen(
     var joinMessage by remember { mutableStateOf<String?>(null) }
     var isOffline by remember { mutableStateOf(!ApiClient.isOnline()) }
 
-    val repository = remember { ActivityRepository() }
+    // 2. Room DAO Access: Obtains Application context safely to pass ActivityDao to repository
+    val context = LocalContext.current
+    val repository = remember {
+        ActivityRepository(
+            activityDao = (context.applicationContext as App).database.activityDao()
+        )
+    }
 
+    // 3. Disk Fallback Path: If memory cache is empty (e.g. process restart), query Room via Repository
     LaunchedEffect(activityId) {
         if (activity == null && activityId.isNotBlank()) {
             isLoading = true
-            val loaded = repository.getActivityById(activityId, userLat = 4.6382, userLon = -74.0840)
+            val loaded = repository.getActivityById(activityId)
             activity = loaded
             isJoined = loaded?.joined == true
             isLoading = false
@@ -258,7 +265,7 @@ fun ActivityDetailScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Chips de características (Categoría, Precio, Cupos, Duración, Distancia)
+                    // Chips de características
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -376,6 +383,7 @@ fun ActivityDetailScreen(
                             joinMessage = null
                             CoroutineScope(Dispatchers.IO).launch {
                                 try {
+                                    // Verified HTTP Join: throws exception if HTTP request fails, preventing false positive state
                                     repository.joinActivity(
                                         activityId = act.id,
                                         recommendationId = act.recommendationId,
