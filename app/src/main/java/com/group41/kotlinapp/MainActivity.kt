@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,6 +32,7 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,17 +57,6 @@ import com.group41.kotlinapp.ui.theme.LlamallaBlue
 import com.group41.kotlinapp.ui.theme.LlamallaRose
 import com.group41.kotlinapp.viewmodel.RecommendationsViewModel
 
-/**
- * Vista Protegida 1 — Feed de Recomendaciones de Actividades.
- *
- * Aplica los pilares de la sustentación oral (Viva Voce 3):
- * 1. Conectividad Eventual (5 pts): Carga actividades desde la caché en memoria LRU y la
- *    caché HTTP en disco cuando no hay conexión. Muestra un banner informativo offline.
- * 2. Caché de Imágenes con Coil (5 pts): Renderiza las fotos reales del prototipo usando
- *    AsyncImage con almacenamiento en disco y memoria RAM.
- * 3. Prototipo Figma: Muestra fotos, precio, cupos, duración y distancia calculada.
- *    Al tocar cualquier tarjeta, navega a la Vista Protegida 2 (ActivityDetailActivity).
- */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,9 +84,14 @@ fun RecommendationScreen(
 ) {
     val context = LocalContext.current
     val isOffline by viewModel.isOffline.collectAsState()
+    val userId = ApiClient.tokens.userId
 
     var selectedCategories by remember {
         mutableStateOf(setOf<String>())
+    }
+
+    var isPreferencesLoaded by remember {
+        mutableStateOf(false)
     }
 
     var recommendations by remember {
@@ -110,6 +104,18 @@ fun RecommendationScreen(
 
     var errorMessage by remember {
         mutableStateOf<String?>(null)
+    }
+
+    // Automatically restores saved preferences from Room when the screen opens
+    LaunchedEffect(userId) {
+        if (!userId.isNullOrBlank()) {
+            viewModel.loadPreferences(userId) { restoredCategories ->
+                selectedCategories = restoredCategories
+                isPreferencesLoaded = true
+            }
+        } else {
+            isPreferencesLoaded = true
+        }
     }
 
     val categories = listOf(
@@ -155,8 +161,8 @@ fun RecommendationScreen(
                             .padding(horizontal = 14.dp, vertical = 8.dp)
                     )
 
-                    // Indicador de estado de red
-                    if (isOffline || !ApiClient.isOnline()) {
+                    // Single source of truth for offline badge
+                    if (isOffline) {
                         Box(
                             modifier = Modifier
                                 .background(Color(0xFFFFF3CD), RoundedCornerShape(8.dp))
@@ -174,8 +180,8 @@ fun RecommendationScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Banner offline explicativo cuando no hay internet
-                if (isOffline || !ApiClient.isOnline()) {
+                // Single source of truth for offline explanation banner
+                if (isOffline) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -284,18 +290,33 @@ fun RecommendationScreen(
             item {
                 Button(
                     onClick = {
-                        viewModel.updatePreferences(selectedCategories)
+                        val currentUserId = ApiClient.tokens.userId
+                        if (currentUserId.isNullOrBlank()) {
+                            errorMessage = "Usuario no autenticado"
+                            return@Button
+                        }
 
                         isLoading = true
                         errorMessage = null
 
-                        viewModel.loadRecommendedActivities(
-                            latitude = 4.6382,
-                            longitude = -74.0840,
-                            radiusKm = 10.0,
-                            onSuccess = { activities ->
-                                recommendations = activities
-                                isLoading = false
+                        viewModel.updatePreferences(
+                            userId = currentUserId,
+                            categories = selectedCategories,
+                            onSuccess = {
+                                viewModel.loadRecommendedActivities(
+                                    userId = currentUserId,
+                                    latitude = 4.6382,
+                                    longitude = -74.0840,
+                                    radiusKm = 10.0,
+                                    onSuccess = { activities ->
+                                        recommendations = activities
+                                        isLoading = false
+                                    },
+                                    onError = { error ->
+                                        errorMessage = error
+                                        isLoading = false
+                                    }
+                                )
                             },
                             onError = { error ->
                                 errorMessage = error
@@ -303,7 +324,7 @@ fun RecommendationScreen(
                             }
                         )
                     },
-                    enabled = !isLoading,
+                    enabled = !isLoading && isPreferencesLoaded,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -409,7 +430,6 @@ fun RecommendationCard(
         )
     ) {
         Column {
-            // Imagen del prototipo con caché de Coil
             if (!activity.imageUrl.isNullOrBlank()) {
                 AsyncImage(
                     model = activity.imageUrl,
@@ -434,7 +454,6 @@ fun RecommendationCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Chips con datos del prototipo (Categoría, Precio, Cupos)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -470,7 +489,6 @@ fun RecommendationCard(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Duración y distancia (calculada offline vía Haversine si es necesario)
                 Text(
                     text = "${activity.durationMinutes} min · ${activity.distanceMeters} m",
                     color = Color.DarkGray,

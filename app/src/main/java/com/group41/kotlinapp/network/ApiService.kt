@@ -23,7 +23,7 @@ interface ApiService {
     @POST("api/auth/register")
     suspend fun register(@Body body: RegisterRequest): AuthResponse
 
-    // Síncrono a propósito: lo usa el refresh automático de ApiClient
+    // Synchronous on purpose: used by ApiClient automatic refresh
     @POST("api/auth/refresh")
     fun refresh(@Body body: RefreshRequest): Call<AuthResponse>
 
@@ -44,8 +44,8 @@ interface ApiService {
     suspend fun deleteAvatar(): UserDto
 
     /**
-     * Response y no la lista directa: los headers X-Recommendation-Id y
-     * X-Free-Time-Minutes hay que guardarlos junto a la lista (ver RecommendationsPage).
+     * Response instead of direct list: headers X-Recommendation-Id and
+     * X-Free-Time-Minutes must be stored alongside the list.
      */
     @GET("api/activities/recommendations")
     suspend fun recommendations(
@@ -69,9 +69,12 @@ interface ApiService {
         @Query("lon") lon: Double? = null
     ): Response<JsonObject>
 
+    @POST("api/activities")
+    suspend fun createActivity(@Body body: CreateActivityRequest): Response<JsonObject>
+
     /**
-     * recommendationId y freeTimeMinutes solo si el usuario se une desde la
-     * lista de recomendaciones; desde otro lugar van null y Retrofit los omite.
+     * recommendationId and freeTimeMinutes only if the user joins from the
+     * recommendations list; from elsewhere they pass as null and Retrofit omits them.
      */
     @POST("api/activities/{id}/join")
     suspend fun join(
@@ -96,7 +99,7 @@ interface ApiService {
     ): GapsResponse
 }
 
-/** Una carga de recomendaciones con el id que el backend le asignó. */
+/** A recommendation payload with the ID assigned by the backend. */
 class RecommendationsPage(
     val items: JsonArray,
     val recommendationId: String?,
@@ -111,6 +114,6 @@ class RecommendationsPage(
     }
 }
 
-/** Unirse a una actividad que vino de esta carga de recomendaciones. */
+/** Join an activity retrieved from this recommendation payload. */
 suspend fun ApiService.joinFromRecommendations(activityId: String, page: RecommendationsPage) =
     join(activityId, page.recommendationId, page.freeTimeMinutes)

@@ -1,6 +1,7 @@
 package com.group41.kotlinapp.viewmodel
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.group41.kotlinapp.App
@@ -17,23 +18,44 @@ import kotlinx.coroutines.withContext
 
 /**
  * ViewModel responsible for fetching, filtering, and joining recommended activities.
- * Extends AndroidViewModel to access the Application context and obtain the Room database instance.
+ * Extends AndroidViewModel to access the Application context and obtain Room database DAOs.
  */
 class RecommendationsViewModel(application: Application) : AndroidViewModel(application) {
 
-    /**
-     * Initializes ActivityRepository by supplying ActivityDao from the App database singleton.
-     * Casts the Application instance to the app's custom App class to access the shared Room database.
-     */
     private val activityRepository = ActivityRepository(
         activityDao = (application as App).database.activityDao()
     )
-    private val preferencesRepository = PreferencesRepository()
+    private val preferencesRepository = PreferencesRepository(
+        preferencesDao = (application as App).database.preferencesDao()
+    )
 
     private val _isOffline = MutableStateFlow(false)
     val isOffline: StateFlow<Boolean> = _isOffline.asStateFlow()
 
+    /**
+     * Reads user preferences from Room database for the given userId and returns selected categories to UI.
+     */
+    fun loadPreferences(
+        userId: String,
+        onResult: (Set<String>) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val preferences = preferencesRepository.getPreferences(userId)
+                withContext(Dispatchers.Main) {
+                    onResult(preferences.preferredCategories)
+                }
+            } catch (e: Exception) {
+                Log.e("RecommendationsViewModel", "Error loading preferences for userId=$userId", e)
+                withContext(Dispatchers.Main) {
+                    onResult(emptySet())
+                }
+            }
+        }
+    }
+
     fun loadRecommendedActivities(
+        userId: String,
         latitude: Double,
         longitude: Double,
         radiusKm: Double = 10.0,
@@ -42,7 +64,6 @@ class RecommendationsViewModel(application: Application) : AndroidViewModel(appl
     ) {
         viewModelScope.launch {
             try {
-                // Evaluates device network reachability safely; defaults to false if connectivity check fails
                 val online = try {
                     ApiClient.isOnline()
                 } catch (_: Exception) {
@@ -56,7 +77,7 @@ class RecommendationsViewModel(application: Application) : AndroidViewModel(appl
                     radiusKm = radiusKm
                 )
 
-                val preferences = preferencesRepository.getPreferences()
+                val preferences = preferencesRepository.getPreferences(userId)
 
                 val orderedActivities =
                     if (preferences.preferredCategories.isEmpty()) {
@@ -93,8 +114,25 @@ class RecommendationsViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    fun updatePreferences(categories: Set<String>) {
-        preferencesRepository.updatePreferences(categories)
+    fun updatePreferences(
+        userId: String,
+        categories: Set<String>,
+        onSuccess: (() -> Unit)? = null,
+        onError: ((String) -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            try {
+                preferencesRepository.updatePreferences(userId, categories)
+                withContext(Dispatchers.Main) {
+                    onSuccess?.invoke()
+                }
+            } catch (e: Exception) {
+                Log.e("RecommendationsViewModel", "Error saving preferences to Room for userId=$userId", e)
+                withContext(Dispatchers.Main) {
+                    onError?.invoke(e.message ?: "Error al guardar preferencias")
+                }
+            }
+        }
     }
 
     fun joinActivity(

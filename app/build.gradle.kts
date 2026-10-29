@@ -84,4 +84,5 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
+    androidTestImplementation("org.mockito:mockito-android:5.24.0")
 }
