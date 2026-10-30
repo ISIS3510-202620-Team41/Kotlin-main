@@ -93,8 +93,12 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
+
+    androidTestImplementation("org.mockito:mockito-android:5.24.0")
+
     // WorkManager: el servicio de Android que vuelve a ejecutar una tarea mas tarde,
     // incluso si el usuario cierra la app. Lo usamos para reenviar las inscripciones
     // que quedaron guardadas mientras no habia internet.
     implementation(libs.work.runtime.ktx)
+
 }

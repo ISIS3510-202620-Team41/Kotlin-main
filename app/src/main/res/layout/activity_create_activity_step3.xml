@@ -36,7 +36,7 @@
         app:layout_constraintStart_toEndOf="@id/btn_back"
         app:layout_constraintTop_toTopOf="@id/btn_back" />
 
-    <!-- Indicador de pasos: 4 segmentos, este es el paso 3 -->
+    <!-- Step indicator: 4 segments, step 3 active -->
     <LinearLayout
         android:id="@+id/ll_steps"
         android:layout_width="0dp"
@@ -78,7 +78,7 @@
 
     </LinearLayout>
 
-    <!-- Fila de busqueda: campo + boton de filtros -->
+    <!-- Search row: input field + filter button -->
     <LinearLayout
         android:id="@+id/ll_search"
         android:layout_width="0dp"
@@ -143,7 +143,7 @@
                 android:id="@+id/card_bistro"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_card_selected_outline"
+                android:background="@drawable/bg_card_white"
                 android:padding="12dp">
 
                 <TextView
@@ -187,7 +187,7 @@
                     android:id="@+id/rb_bistro"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:checked="true"
+                    android:checked="false"
                     android:clickable="false"
                     app:buttonTint="@color/rosewood"
                     app:layout_constraintBottom_toBottomOf="parent"
