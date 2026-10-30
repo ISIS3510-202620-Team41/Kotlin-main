@@ -7,6 +7,7 @@ import com.group41.kotlinapp.App
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.repository.ActivityRepository
+import com.group41.kotlinapp.repository.JoinResult
 import com.group41.kotlinapp.repository.PendingActionRepository
 import com.group41.kotlinapp.repository.PreferencesRepository
 import kotlinx.coroutines.Dispatchers
@@ -103,20 +104,30 @@ class RecommendationsViewModel(application: Application) : AndroidViewModel(appl
         preferencesRepository.updatePreferences(categories)
     }
 
+    /**
+     * Inscribe al usuario, funcione o no el internet.
+     *
+     * @param onSuccess recibe true cuando la inscripcion quedo GUARDADA esperando conexion,
+     *        y false cuando el backend ya la confirmo. La tarjeta usa ese dato para decir
+     *        "Pendiente" en vez de "Unido", porque prometer un cupo que el servidor no ha
+     *        confirmado es lo unico que el usuario no nos perdonaria.
+     * @param onError solo se llama cuando el backend RECHAZO la inscripcion. Los fallos de
+     *        red ya no llegan aqui: esos los guarda el repositorio en la cola offline.
+     */
     fun joinActivity(
         activity: Activity,
-        onSuccess: () -> Unit,
+        onSuccess: (queued: Boolean) -> Unit,
         onError: (String) -> Unit
     ) {
         viewModelScope.launch {
             try {
-                activityRepository.joinActivity(
+                val result = activityRepository.joinActivity(
                     activityId = activity.id,
                     recommendationId = activity.recommendationId,
                     freeTimeMinutes = activity.freeTimeMinutes
                 )
                 withContext(Dispatchers.Main) {
-                    onSuccess()
+                    onSuccess(result == JoinResult.QUEUED)
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {

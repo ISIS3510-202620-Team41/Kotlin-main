@@ -37,10 +37,12 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,8 +56,11 @@ import coil.compose.AsyncImage
 import com.group41.kotlinapp.cache.ActivityMemoryCache
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.connectivity.ConnectivityObserver
 import com.group41.kotlinapp.repository.ActivityRepository
+import com.group41.kotlinapp.repository.JoinResult
 import com.group41.kotlinapp.repository.PendingActionRepository
+import kotlinx.coroutines.flow.map
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.ui.theme.LlamallaBlack
 import com.group41.kotlinapp.ui.theme.LlamallaBlue
@@ -121,11 +126,45 @@ fun ActivityDetailScreen(
     var isLoading by remember { mutableStateOf(activity == null) }
     var isJoining by remember { mutableStateOf(false) }
     var isJoined by remember { mutableStateOf(activity?.joined == true) }
+
+    /**
+     * El usuario ya esta inscrito, pero el backend todavia no lo sabe.
+     *
+     * Arranca leyendo lo que haya guardado en la actividad, no en false. Eso es lo que hace
+     * que el aviso siga ahi despues de cerrar y volver a abrir la app: el dato vive en la
+     * base de datos local, no en la memoria de esta pantalla.
+     */
+    var isPendingSync by remember { mutableStateOf(activity?.pendingSync == true) }
     var joinMessage by remember { mutableStateOf<String?>(null) }
-    var isOffline by remember { mutableStateOf(!ApiClient.isOnline()) }
 
     // 2. Room DAO Access: Obtains Application context safely to pass ActivityDao to repository
     val context = LocalContext.current
+
+    /**
+     * Si hay internet o no, pero avisando en el momento en que cambia.
+     *
+     * Antes esto se calculaba una sola vez con `ApiClient.isOnline()`. El problema es que
+     * esa es una foto del instante en que se abrio la pantalla: si el usuario activaba el
+     * modo avion estando aqui, el banner de offline no aparecia hasta que saliera y volviera
+     * a entrar. Y al reves: al volver el wifi, el banner se quedaba puesto mintiendo.
+     *
+     * ConnectivityObserver da un flujo de avisos, y collectAsState hace que Compose vuelva a
+     * dibujar la pantalla sola cada vez que llega uno.
+     */
+    val connectivity = remember { ConnectivityObserver(context) }
+    val isOffline by connectivity.isOnline
+        .map { online -> !online }
+        .collectAsState(initial = !connectivity.currentlyOnline())
+
+    /**
+     * El alcance donde corre la inscripcion.
+     *
+     * Se usa rememberCoroutineScope y no CoroutineScope(Dispatchers.IO) a mano, que era lo
+     * que habia antes, porque este se cancela solo cuando el usuario sale de la pantalla.
+     * Con el anterior, salir a mitad de una inscripcion dejaba la tarea corriendo e
+     * intentando escribir en una pantalla que ya no existe.
+     */
+    val joinScope = rememberCoroutineScope()
     val repository = remember {
         ActivityRepository(
             activityDao = (context.applicationContext as App).database.activityDao(),
@@ -144,6 +183,9 @@ fun ActivityDetailScreen(
             val loaded = repository.getActivityById(activityId)
             activity = loaded
             isJoined = loaded?.joined == true
+            // Se recupera junto con `joined`: si la inscripcion se hizo sin internet y la
+            // app se cerro, al volver tiene que seguir diciendo que esta pendiente.
+            isPendingSync = loaded?.pendingSync == true
             isLoading = false
         }
     }
@@ -387,24 +429,37 @@ fun ActivityDetailScreen(
                         onClick = {
                             isJoining = true
                             joinMessage = null
-                            CoroutineScope(Dispatchers.IO).launch {
+                            joinScope.launch {
                                 try {
-                                    // Verified HTTP Join: throws exception if HTTP request fails, preventing false positive state
-                                    repository.joinActivity(
+                                    // joinActivity ya no devuelve solo "funciono o no": dice
+                                    // tambien si la inscripcion salio de verdad al servidor
+                                    // o si quedo guardada esperando que vuelva el internet.
+                                    val result = repository.joinActivity(
                                         activityId = act.id,
                                         recommendationId = act.recommendationId,
                                         freeTimeMinutes = act.freeTimeMinutes
                                     )
-                                    withContext(Dispatchers.Main) {
-                                        isJoined = true
-                                        isJoining = false
-                                        joinMessage = "¡Te has unido exitosamente!"
+                                    isJoined = true
+                                    isJoining = false
+                                    isPendingSync = result == JoinResult.QUEUED
+
+                                    // Dos mensajes distintos porque son dos situaciones
+                                    // distintas. Decir "exitosamente" cuando el servidor ni
+                                    // se ha enterado seria mentirle al usuario, y si la
+                                    // actividad se llena mientras tanto se llevaria una
+                                    // sorpresa al llegar.
+                                    joinMessage = if (result == JoinResult.QUEUED) {
+                                        "Guardado sin conexion. Se enviara solo cuando vuelva el internet."
+                                    } else {
+                                        "¡Te has unido exitosamente!"
                                     }
                                 } catch (e: Exception) {
-                                    withContext(Dispatchers.Main) {
-                                        isJoining = false
-                                        joinMessage = e.message ?: "Error al inscribirse"
-                                    }
+                                    // Solo se llega aqui cuando el backend rechazo la
+                                    // inscripcion (la actividad se lleno, ya estabas
+                                    // inscrito). Los fallos de red no caen aqui: esos los
+                                    // guarda el repositorio en la cola.
+                                    isJoining = false
+                                    joinMessage = e.message ?: "Error al inscribirse"
                                 }
                             }
                         },
@@ -421,8 +476,12 @@ fun ActivityDetailScreen(
                         )
                     ) {
                         Text(
+                            // El estado "inscrito pero pendiente" se dice con todas sus
+                            // letras en vez de con el visto de siempre. El usuario tiene
+                            // derecho a saber que su cupo todavia no esta confirmado.
                             text = when {
                                 isJoining -> "Inscribiendo..."
+                                isJoined && isPendingSync -> "Inscrito (pendiente de sincronizar)"
                                 isJoined -> "Inscrito a esta actividad ✓"
                                 else -> "Unirme a esta actividad"
                             },
@@ -436,7 +495,15 @@ fun ActivityDetailScreen(
                         Text(
                             text = msg,
                             fontSize = 14.sp,
-                            color = if (isJoined) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                            // Tres colores para tres significados: verde cuando el servidor
+                            // confirmo, ambar cuando esta guardado pero sin confirmar, y rojo
+                            // cuando fallo. Pintar el pendiente de verde lo haria pasar por
+                            // confirmado, que es justo lo que se quiere evitar.
+                            color = when {
+                                isJoined && isPendingSync -> Color(0xFFB26A00)
+                                isJoined -> Color(0xFF2E7D32)
+                                else -> MaterialTheme.colorScheme.error
+                            },
                             fontWeight = FontWeight.Medium
                         )
                     }

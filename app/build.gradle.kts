@@ -80,6 +80,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
     // Tests de los ViewModel: misma versión de corrutinas que trae el proyecto
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    // En los tests que corren en el PC (sin emulador), las clases de Android vienen
+    // vacias y JSONObject lanza "Stub!" al usarla. Esta libreria trae la implementacion
+    // de verdad, que es la misma que Android usa por dentro, para poder probar el
+    // empaquetado de las acciones encoladas sin necesitar un dispositivo.
+    testImplementation("org.json:json:20240303")
     implementation(libs.play.services.auth)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation(libs.room.runtime)
