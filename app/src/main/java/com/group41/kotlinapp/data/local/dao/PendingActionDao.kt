@@ -2,6 +2,7 @@ package com.group41.kotlinapp.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.group41.kotlinapp.data.local.entity.PendingActionEntity
@@ -34,6 +35,27 @@ interface PendingActionDao {
      */
     @Insert
     suspend fun insertAction(action: PendingActionEntity)
+
+    /**
+     * Guarda la accion solo si no habia ya una igual, y avisa si la guardo o no.
+     *
+     * Existe aparte de `insertAction` porque esa usa la estrategia ABORT a proposito:
+     * lanza excepcion si el id se repite. Eso esta bien cuando el id es nuevo cada vez,
+     * pero la cola offline necesita lo contrario.
+     *
+     * El caso real: el usuario sin internet toca "Unirme", no ve respuesta inmediata y
+     * vuelve a tocar. Son dos toques pero una sola intencion. Si se encolaran las dos,
+     * al volver la conexion se mandarian dos inscripciones a la misma actividad.
+     *
+     * La solucion es darle a la accion un id que se calcula a partir de lo que hace
+     * (ver PendingActionRepository.joinActionId) y dejar que la base de datos rechace
+     * el repetido. IGNORE hace justo eso sin lanzar excepcion.
+     *
+     * Devuelve la posicion de la fila insertada, o -1 si ya existia una igual y no se
+     * guardo nada. Quien llama usa ese -1 para saber que no hace falta encolar de nuevo.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(action: PendingActionEntity): Long
 
     /**
      * Updates an existing action in the queue.

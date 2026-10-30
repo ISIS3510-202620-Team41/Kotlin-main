@@ -33,7 +33,11 @@ fun Activity.toEntity(): ActivityEntity {
         imageUrl = imageUrl,
         description = description,
         startTime = startTime,
-        endTime = endTime
+        endTime = endTime,
+        // Se copia tal cual: si la actividad venia marcada como pendiente, tiene que
+        // seguir marcada al guardarla, o al reiniciar la app el aviso desapareceria
+        // y el usuario creeria que su inscripcion ya llego al servidor.
+        pendingSync = pendingSync
     )
 }
 
@@ -62,6 +66,9 @@ fun ActivityEntity.toActivity(): Activity {
         imageUrl = imageUrl,
         description = description,
         startTime = startTime,
-        endTime = endTime
+        endTime = endTime,
+        // Al leer del disco se recupera el aviso: asi la pantalla sabe, desde el primer
+        // momento, que esa inscripcion sigue esperando a que vuelva el internet.
+        pendingSync = pendingSync
     )
 }

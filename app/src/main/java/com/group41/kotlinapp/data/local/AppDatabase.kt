@@ -17,7 +17,11 @@ import com.group41.kotlinapp.data.local.entity.PendingActionEntity
     entities = [ActivityEntity::class, UserPreferenceEntity::class
     , PendingActionEntity::class
     ],
-    version = 1,
+    // La version sube cada vez que cambia la forma de alguna tabla. Pasa a 2 porque se
+    // agrego la columna `pendingSync` a `activities`. Por cada salto de version tiene que
+    // existir una migracion en Migrations.kt, o la app se cerrara al abrirse en un telefono
+    // que ya tenia la version anterior instalada.
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

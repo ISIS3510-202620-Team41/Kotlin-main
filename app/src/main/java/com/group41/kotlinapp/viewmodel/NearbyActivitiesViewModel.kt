@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import com.group41.kotlinapp.repository.PendingActionRepository
 import kotlinx.coroutines.launch
 
 /**
@@ -63,7 +64,13 @@ data class NearbyUiState(
 class NearbyActivitiesViewModel(application: Application) : AndroidViewModel(application) {
 
     private val activityRepository = ActivityRepository(
-        activityDao = (application as App).database.activityDao()
+        activityDao = (application as App).database.activityDao(),
+        // Se pasa tambien aqui para que el repositorio se comporte igual sin importar
+        // desde que pantalla se use: una inscripcion hecha desde la busqueda por cercania
+        // tiene que guardarse sin internet exactamente como la hecha desde el detalle.
+        pendingActions = PendingActionRepository(
+            (application as App).database.pendingActionDao()
+        )
     )
 
     private val locationProvider = LocationProvider(application)
