@@ -55,6 +55,7 @@ import com.group41.kotlinapp.cache.ActivityMemoryCache
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.repository.ActivityRepository
+import com.group41.kotlinapp.repository.PendingActionRepository
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.ui.theme.LlamallaBlack
 import com.group41.kotlinapp.ui.theme.LlamallaBlue
@@ -127,7 +128,12 @@ fun ActivityDetailScreen(
     val context = LocalContext.current
     val repository = remember {
         ActivityRepository(
-            activityDao = (context.applicationContext as App).database.activityDao()
+            activityDao = (context.applicationContext as App).database.activityDao(),
+            // Esta es la pantalla donde el usuario toca "Unirme", asi que es la que mas
+            // necesita el buzon: es aqui donde la inscripcion sin internet se guarda.
+            pendingActions = PendingActionRepository(
+                (context.applicationContext as App).database.pendingActionDao()
+            )
         )
     }
 

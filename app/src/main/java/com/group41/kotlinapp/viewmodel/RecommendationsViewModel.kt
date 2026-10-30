@@ -7,6 +7,7 @@ import com.group41.kotlinapp.App
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.repository.ActivityRepository
+import com.group41.kotlinapp.repository.PendingActionRepository
 import com.group41.kotlinapp.repository.PreferencesRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,7 +27,12 @@ class RecommendationsViewModel(application: Application) : AndroidViewModel(appl
      * Casts the Application instance to the app's custom App class to access the shared Room database.
      */
     private val activityRepository = ActivityRepository(
-        activityDao = (application as App).database.activityDao()
+        activityDao = (application as App).database.activityDao(),
+        // El buzon de acciones pendientes: sin el, tocar "Unirme" sin internet fallaria
+        // con un error en vez de guardarse para enviarlo despues.
+        pendingActions = PendingActionRepository(
+            (application as App).database.pendingActionDao()
+        )
     )
     private val preferencesRepository = PreferencesRepository()
 

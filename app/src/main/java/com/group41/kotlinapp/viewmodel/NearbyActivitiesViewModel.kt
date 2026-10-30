@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.group41.kotlinapp.App
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.repository.ActivityRepository
+import com.group41.kotlinapp.repository.PendingActionRepository
 import kotlinx.coroutines.launch
 
 /**
@@ -19,7 +20,13 @@ class NearbyActivitiesViewModel(application: Application) : AndroidViewModel(app
      * Casts the Application instance to the app's custom App class to access the shared Room database.
      */
     private val activityRepository = ActivityRepository(
-        activityDao = (application as App).database.activityDao()
+        activityDao = (application as App).database.activityDao(),
+        // Se pasa tambien aqui para que el repositorio se comporte igual sin importar
+        // desde que pantalla se use: una inscripcion hecha desde la busqueda por cercania
+        // tiene que guardarse sin internet exactamente como la hecha desde el detalle.
+        pendingActions = PendingActionRepository(
+            (application as App).database.pendingActionDao()
+        )
     )
 
     /**
