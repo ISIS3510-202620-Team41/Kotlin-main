@@ -391,6 +391,16 @@ fun RecommendationCard(
         mutableStateOf(activity.joined)
     }
 
+    /**
+     * La inscripcion esta guardada en el telefono pero el servidor aun no la conoce.
+     *
+     * Arranca con lo que trae la actividad y no en false, porque esa actividad pudo venir
+     * de la base de datos local con una inscripcion que quedo pendiente la vez pasada.
+     */
+    var isPendingSync by remember(activity.id) {
+        mutableStateOf(activity.pendingSync)
+    }
+
     var isJoining by remember(activity.id) {
         mutableStateOf(false)
     }
@@ -495,9 +505,12 @@ fun RecommendationCard(
 
                         viewModel.joinActivity(
                             activity = activity,
-                            onSuccess = {
+                            // queued = true significa que no habia internet y la inscripcion
+                            // se guardo para mandarla despues.
+                            onSuccess = { queued ->
                                 isJoined = true
                                 isJoining = false
+                                isPendingSync = queued
                             },
                             onError = { error ->
                                 joinError = error
@@ -516,8 +529,11 @@ fun RecommendationCard(
                     )
                 ) {
                     Text(
+                        // "Pendiente" y no "Unido" mientras el servidor no confirme: el
+                        // reloj dice que esta guardado pero todavia en camino.
                         text = when {
                             isJoining -> "Uniendo..."
+                            isJoined && isPendingSync -> "Pendiente de enviar ⏱"
                             isJoined -> "Unido ✓"
                             else -> "Unirme"
                         }

@@ -29,5 +29,15 @@ data class Activity(
     val imageUrl: String? = null,
     val description: String? = null,
     val startTime: String? = null,
-    val endTime: String? = null
+    val endTime: String? = null,
+
+    /**
+     * La inscripcion se guardo en el telefono pero el backend todavia no la recibio.
+     *
+     * Esta aqui, en el modelo que usan las pantallas, y no solo en la base de datos,
+     * porque es la pantalla la que tiene que avisarle al usuario que su inscripcion
+     * esta guardada pero aun no confirmada. Si este dato se quedara en la capa de datos,
+     * la UI no tendria como saberlo y le mentiria al usuario diciendole "listo".
+     */
+    val pendingSync: Boolean = false
 ) : Serializable

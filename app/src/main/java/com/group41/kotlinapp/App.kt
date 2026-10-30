@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.room.Room
 import com.group41.kotlinapp.analytics.Analytics
 import com.group41.kotlinapp.data.local.AppDatabase
+import com.group41.kotlinapp.data.local.MIGRATION_1_2
 import com.group41.kotlinapp.network.ApiClient
 
 class App : Application() {
@@ -21,7 +22,12 @@ class App : Application() {
             applicationContext,
             AppDatabase::class.java,
             "llamalla.db"
-        ).build()
+        )
+            // Sin esta linea Room no sabria como pasar de la version 1 a la 2 y cerraria
+            // la app al abrirla. Con ella, el usuario que ya tenia la app instalada
+            // conserva todo lo que habia descargado.
+            .addMigrations(MIGRATION_1_2)
+            .build()
     }
 
     override fun onCreate() {
