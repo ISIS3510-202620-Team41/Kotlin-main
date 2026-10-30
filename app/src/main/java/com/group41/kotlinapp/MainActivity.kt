@@ -374,6 +374,24 @@ fun RecommendationScreen(
                     Text("Buscar por punto de encuentro")
                 }
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = {
+                        val intent = Intent(
+                            context,
+                            CreateActivityStep1Activity::class.java
+                        )
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LlamallaRose
+                    )
+                ) {
+                    Text("Crear actividad")
+                }
+
                 Spacer(modifier = Modifier.height(18.dp))
 
                 Text(
