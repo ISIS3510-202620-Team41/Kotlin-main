@@ -11,6 +11,8 @@ import com.group41.kotlinapp.repository.ActivityRepository
 import com.group41.kotlinapp.repository.JoinResult
 import com.group41.kotlinapp.repository.PendingActionRepository
 import com.group41.kotlinapp.repository.PreferencesRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -61,6 +63,8 @@ class RecommendationsViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
+    private var recommendationsJob: Job? = null
+
     fun loadRecommendedActivities(
         userId: String,
         latitude: Double,
@@ -69,7 +73,8 @@ class RecommendationsViewModel(application: Application) : AndroidViewModel(appl
         onSuccess: (List<Activity>) -> Unit,
         onError: (String) -> Unit
     ) {
-        viewModelScope.launch {
+        recommendationsJob?.cancel()
+        recommendationsJob = viewModelScope.launch {
             try {
                 val online = try {
                     ApiClient.isOnline()
@@ -99,6 +104,8 @@ class RecommendationsViewModel(application: Application) : AndroidViewModel(appl
                     onSuccess(orderedActivities)
                 }
 
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     onError(e.message ?: "Error al cargar recomendaciones")
