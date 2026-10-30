@@ -86,6 +86,10 @@ dependencies {
     // empaquetado de las acciones encoladas sin necesitar un dispositivo.
     testImplementation("org.json:json:20240303")
     implementation(libs.play.services.auth)
+    // El servicio de ubicacion de Google. Se usa en vez del LocationManager que trae
+    // Android a secas porque combina GPS, antenas de telefonia y wifi para dar una
+    // posicion mas rapida y gastando menos bateria que el GPS solo.
+    implementation(libs.play.services.location)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
