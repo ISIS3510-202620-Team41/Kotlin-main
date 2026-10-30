@@ -220,12 +220,20 @@ class ActivityRepository(
         radiusKm: Double
     ): LocalNearbyResult {
         // Paso 1: traer lo guardado. En el hilo de espera, porque esto es leer disco.
+        //
+        // Se lee del DISCO primero, no de la memoria, y el motivo es importante:
+        // ActivityMemoryCache es una cache LRU con tope de 50 actividades. Esta pensada para
+        // buscar UNA por su id, donde responde al instante, no para recorrerlas todas.
+        //
+        // Si aqui se leyera de la memoria, un usuario con 200 actividades guardadas solo
+        // veria las ultimas 50 que miro, y las otras 150 desapareceran de la busqueda sin
+        // que nada lo avise. Una actividad a dos cuadras no apareceria solo porque hace
+        // rato que no la abre.
+        //
+        // La memoria queda como respaldo para cuando no hay base de datos a mano.
         val stored = withContext(Dispatchers.IO) {
-            val fromMemory = ActivityMemoryCache.snapshot()
-            // La memoria se vacia cuando Android mata la app para liberar RAM. El disco no,
-            // asi que es el que de verdad garantiza que esto funcione sin internet.
-            if (fromMemory.isNotEmpty()) fromMemory
-            else activityDao?.getAllActivities()?.first()?.map { it.toActivity() }.orEmpty()
+            val fromDisk = activityDao?.getAllActivities()?.first()?.map { it.toActivity() }
+            if (!fromDisk.isNullOrEmpty()) fromDisk else ActivityMemoryCache.snapshot()
         }
 
         // Paso 2: filtrar y medir. En el hilo de calculo, porque esto es pura aritmetica.
