@@ -283,6 +283,96 @@ class ActivityRepository(
     }
 
     /**
+     * Resultado de una busqueda por cercania hecha solo con lo que hay guardado en el telefono.
+     *
+     * @param activities las actividades dentro del radio, de la mas cercana a la mas lejana.
+     * @param elapsedMillis cuanto tardo el calculo. Se mide y se devuelve para poder
+     *        demostrar que el trabajo pesado corre fuera del hilo de la pantalla y que, aun
+     *        asi, termina en milisegundos.
+     */
+    data class LocalNearbyResult(
+        val activities: List<Activity>,
+        val elapsedMillis: Long
+    )
+
+    /**
+     * Busca actividades cerca del usuario sin tocar la red: todo sale de la base local.
+     *
+     * Este es el comportamiento offline que pide la Vista 3. El telefono ya tiene guardadas
+     * las actividades que descargo antes, con sus coordenadas. Teniendo la posicion del
+     * usuario, se puede calcular aqui mismo cuales quedan dentro del radio, sin preguntarle
+     * nada al servidor.
+     *
+     * LO IMPORTANTE DE ESTA FUNCION: EN QUE HILO CORRE CADA COSA
+     *
+     * Hay dos trabajos distintos y cada uno va a un sitio distinto:
+     *
+     * 1. Leer la base de datos -> Dispatchers.IO. Ese grupo de hilos esta pensado para
+     *    tareas que se pasan el rato ESPERANDO (al disco, a la red). Como esperan sin hacer
+     *    nada, pueden ser muchos a la vez sin estorbarse.
+     *
+     * 2. Calcular las distancias -> Dispatchers.Default. Ese grupo tiene tantos hilos como
+     *    nucleos tiene el procesador, porque aqui no se espera a nadie: se hace cuenta tras
+     *    cuenta, y poner mas hilos que nucleos solo haria que se peleen por el procesador.
+     *
+     * Usar IO para las dos cosas tambien "funcionaria", pero seria usar la herramienta
+     * equivocada. Y hacerlo en el hilo principal congelaria la pantalla: con mil actividades
+     * guardadas, el usuario veria la app trabada mientras se calculan mil raices cuadradas.
+     */
+    suspend fun nearbyFromLocalDatabase(
+        userLat: Double,
+        userLon: Double,
+        radiusKm: Double
+    ): LocalNearbyResult {
+        // Paso 1: traer lo guardado. En el hilo de espera, porque esto es leer disco.
+        //
+        // Se lee del DISCO primero, no de la memoria, y el motivo es importante:
+        // ActivityMemoryCache es una cache LRU con tope de 50 actividades. Esta pensada para
+        // buscar UNA por su id, donde responde al instante, no para recorrerlas todas.
+        //
+        // Si aqui se leyera de la memoria, un usuario con 200 actividades guardadas solo
+        // veria las ultimas 50 que miro, y las otras 150 desapareceran de la busqueda sin
+        // que nada lo avise. Una actividad a dos cuadras no apareceria solo porque hace
+        // rato que no la abre.
+        //
+        // La memoria queda como respaldo para cuando no hay base de datos a mano.
+        val stored = withContext(Dispatchers.IO) {
+            val fromDisk = activityDao?.getAllActivities()?.first()?.map { it.toActivity() }
+            if (!fromDisk.isNullOrEmpty()) fromDisk else ActivityMemoryCache.snapshot()
+        }
+
+        // Paso 2: filtrar y medir. En el hilo de calculo, porque esto es pura aritmetica.
+        return withContext(Dispatchers.Default) {
+            val startedAt = System.nanoTime()
+
+            val withinRadius = stored
+                // Las que no traen coordenadas no se pueden ubicar en el mapa, asi que no
+                // se pueden comparar contra un radio. Se dejan fuera en vez de colarlas con
+                // una distancia inventada de 0, que las pondria siempre de primeras.
+                .filter { it.latitude != 0.0 || it.longitude != 0.0 }
+                .map { activity ->
+                    val meters = calculateHaversineDistanceMeters(
+                        userLat, userLon, activity.latitude, activity.longitude
+                    )
+                    // Se guarda la distancia recalculada: la que venia del servidor se midio
+                    // desde donde estaba el usuario ANTES, y pudo haberse movido desde
+                    // entonces. Esta es la real respecto a donde esta ahora.
+                    activity.copy(distanceMeters = meters)
+                }
+                .filter { it.distanceMeters <= radiusKm * 1000 }
+                // De la mas cercana a la mas lejana: es el orden en el que el usuario quiere
+                // verlas, y ordenar aqui evita que la pantalla tenga que hacerlo despues.
+                .sortedBy { it.distanceMeters }
+
+            // nanoTime y no currentTimeMillis: el primero mide tiempo transcurrido de verdad
+            // y no se ve afectado si el reloj del telefono se ajusta a mitad de la medicion.
+            val elapsed = (System.nanoTime() - startedAt) / 1_000_000
+
+            LocalNearbyResult(withinRadius, elapsed)
+        }
+    }
+
+    /**
      * Retorna las actividades en caché recalculando las distancias localmente y filtrando por radio.
      * Si la memoria está vacía, rehidrata los datos guardados en Room.
      */

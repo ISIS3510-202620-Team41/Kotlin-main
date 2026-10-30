@@ -6,6 +6,18 @@
          local (10.0.2.2 del emulador o la IP del PC). Se pide en tiempo de ejecucion. -->
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Ubicacion para la busqueda por cercania (Vista 3).
+         Se piden los dos niveles a proposito, y el usuario escoge cual concede:
+         - FINE es el GPS: precision de metros, pero gasta mas bateria.
+         - COARSE se apoya en antenas y wifi: precision de cientos de metros.
+         Desde Android 12 el usuario puede dar solo la aproximada, asi que la app tiene que
+         funcionar con cualquiera de las dos. Para buscar actividades en un radio de
+         kilometros, unos cientos de metros de error no cambian el resultado.
+         Ambos son permisos peligrosos: ademas de declararlos aqui hay que pedirselos al
+         usuario en tiempo de ejecucion. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <application
         android:name=".App"
         android:networkSecurityConfig="@xml/network_security_config"
