@@ -12,6 +12,10 @@ import com.group41.kotlinapp.model.PendingActionType
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.network.CreateActivityRequest
 import com.group41.kotlinapp.repository.PendingActionRepository
+import com.group41.kotlinapp.repository.ActivityRepository
+import com.group41.kotlinapp.repository.ActivityChanges
+import com.group41.kotlinapp.cache.ActivityMemoryCache
+import com.group41.kotlinapp.data.local.toActivity
 import kotlinx.coroutines.CancellationException
 import retrofit2.HttpException
 import java.io.IOException
@@ -69,9 +73,7 @@ class SyncWorker(
                 freeTimeMinutes = payload.freeTimeMinutes
             )
 
-            activities.getActivityById(payload.activityId)?.let { stored ->
-                activities.insertActivity(stored.copy(joined = true, pendingSync = false))
-            }
+            confirmJoin(payload.activityId, activities)
             Outcome.DONE
 
         } catch (e: CancellationException) {
@@ -80,8 +82,23 @@ class SyncWorker(
 
         } catch (e: HttpException) {
             when {
+                e.code() == 409 -> {
+                    val remote = ActivityRepository(activities).getActivityById(payload.activityId, serverOnly = true)
+                    if (remote?.joined == true && !remote.pendingSync) {
+                        confirmJoin(payload.activityId, activities)
+                        Outcome.DONE
+                    } else if (remote == null) {
+                        Outcome.RETRY_LATER
+                    } else {
+                        clearPendingJoin(payload.activityId, activities)
+                        Outcome.REJECTED
+                    }
+                }
                 e.code() == 401 -> Outcome.RETRY_LATER
-                e.code() in 400..499 -> Outcome.REJECTED
+                e.code() in 400..499 -> {
+                    clearPendingJoin(payload.activityId, activities)
+                    Outcome.REJECTED
+                }
                 else -> Outcome.RETRY_LATER
             }
 
@@ -108,7 +125,10 @@ class SyncWorker(
             val response = ApiClient.api.createActivity(request)
 
             when (response.code()) {
-                201 -> Outcome.DONE
+                201 -> {
+                    ActivityChanges.notifyChanged()
+                    Outcome.DONE
+                }
                 401, 403, 408, 429 -> Outcome.RETRY_LATER
                 in 500..599 -> Outcome.RETRY_LATER
                 in 400..499 -> Outcome.REJECTED
@@ -121,6 +141,26 @@ class SyncWorker(
         } catch (e: Exception) {
             Outcome.RETRY_LATER
         }
+    }
+
+    private suspend fun confirmJoin(id: String, activities: ActivityDao) {
+        activities.getActivityById(id)?.let {
+            val updated = it.copy(joined = true, pendingSync = false)
+            activities.insertActivity(updated)
+            ActivityMemoryCache.put(updated.toActivity())
+        }
+        ActivityRepository(activities).getActivityById(id)
+        ActivityChanges.notifyChanged()
+    }
+
+    private suspend fun clearPendingJoin(id: String, activities: ActivityDao) {
+        activities.getActivityById(id)?.let {
+            val updated = it.copy(joined = false, pendingSync = false, participants = (it.participants - 1).coerceAtLeast(0))
+            activities.insertActivity(updated)
+            ActivityMemoryCache.put(updated.toActivity())
+        }
+        ActivityRepository(activities).getActivityById(id)
+        ActivityChanges.notifyChanged()
     }
 
     /** Las cuatro cosas que pueden pasarle a una acción de la cola. */

@@ -36,6 +36,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.group41.kotlinapp.repository.ActivityChanges
+import com.group41.kotlinapp.data.local.toActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -176,17 +181,29 @@ fun ActivityDetailScreen(
         )
     }
 
-    // 3. Disk Fallback Path: If memory cache is empty (e.g. process restart), query Room via Repository
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(activityId, lifecycleOwner, isOffline) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            ActivityChanges.changes.collect {
+                if (activityId.isNotBlank()) {
+                    repository.getActivityById(activityId)?.let { loaded ->
+                        activity = loaded
+                        isJoined = loaded.joined
+                        isPendingSync = loaded.pendingSync
+                    }
+                    isLoading = false
+                }
+            }
+        }
+    }
     LaunchedEffect(activityId) {
-        if (activity == null && activityId.isNotBlank()) {
-            isLoading = true
-            val loaded = repository.getActivityById(activityId)
-            activity = loaded
-            isJoined = loaded?.joined == true
-            // Se recupera junto con `joined`: si la inscripcion se hizo sin internet y la
-            // app se cerro, al volver tiene que seguir diciendo que esta pendiente.
-            isPendingSync = loaded?.pendingSync == true
-            isLoading = false
+        (context.applicationContext as App).database.activityDao().getAllActivities().collect { rows ->
+            rows.firstOrNull { it.id == activityId }?.toActivity()?.let { stored ->
+                activity = stored
+                isJoined = stored.joined
+                isPendingSync = stored.pendingSync
+                isLoading = false
+            }
         }
     }
 
@@ -439,6 +456,7 @@ fun ActivityDetailScreen(
                                         recommendationId = act.recommendationId,
                                         freeTimeMinutes = act.freeTimeMinutes
                                     )
+                                    activity = repository.getActivityById(act.id) ?: activity
                                     isJoined = true
                                     isJoining = false
                                     isPendingSync = result == JoinResult.QUEUED
@@ -463,7 +481,7 @@ fun ActivityDetailScreen(
                                 }
                             }
                         },
-                        enabled = !isJoined && !isJoining,
+                        enabled = !isJoined && !isPendingSync && !isJoining,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(54.dp),
@@ -471,7 +489,7 @@ fun ActivityDetailScreen(
                         colors = ButtonDefaults.buttonColors(
                             containerColor = LlamallaBlue,
                             contentColor = LlamallaBlack,
-                            disabledContainerColor = Color(0xFFD0E1E5),
+                            disabledContainerColor = Color(0xFFE0E0E0),
                             disabledContentColor = Color.Gray
                         )
                     ) {

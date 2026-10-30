@@ -64,6 +64,10 @@ object ApiClient {
                     .build()
             }
 
+            // Activity membership and counts must be revalidated on every online read.
+            if (request.method == "GET" && request.url.encodedPath.startsWith("/api/activities") && isOnline(appContext)) {
+                request = request.newBuilder().header("Cache-Control", "no-cache").build()
+            }
             val response = chain.proceed(request)
 
             if (request.method.equals("GET", ignoreCase = true)) {

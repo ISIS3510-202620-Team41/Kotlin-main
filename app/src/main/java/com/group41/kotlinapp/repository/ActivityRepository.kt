@@ -11,6 +11,7 @@ import com.group41.kotlinapp.network.RecommendationsPage
 import com.group41.kotlinapp.sync.SyncScheduler
 import retrofit2.HttpException
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -63,7 +64,9 @@ class ActivityRepository(
      * correcto es que la inscripcion falle a la vista del usuario y no que se pierda
      * en silencio creyendo el que quedo guardada.
      */
-    private val pendingActions: PendingActionRepository? = null
+    private val pendingActions: PendingActionRepository? = null,
+    private val apiProvider: () -> com.group41.kotlinapp.network.ApiService = { ApiClient.api },
+    private val online: () -> Boolean = { ApiClient.isOnline() }
 ) {
 
     /**
@@ -93,13 +96,15 @@ class ActivityRepository(
         // Si ya se sabe que no hay conexion, ni se intenta la peticion. No es solo ahorrar
         // tiempo: intentarla significaria que el usuario ve el boton girando varios segundos
         // hasta que se agote la espera, cuando se le puede responder al instante.
-        if (!ApiClient.isOnline()) {
+        if (!online()) {
             return@withContext queueJoin(payload)
         }
 
         try {
-            ApiClient.api.join(activityId, recommendationId, freeTimeMinutes)
+            apiProvider().join(activityId, recommendationId, freeTimeMinutes)
             markJoinedLocally(activityId, pendingSync = false)
+            getActivityById(activityId)
+            ActivityChanges.notifyChanged()
             JoinResult.SYNCED
 
         } catch (e: IOException) {
@@ -113,7 +118,14 @@ class ActivityRepository(
             // 5xx es un problema del servidor que suele pasarse solo, asi que se guarda.
             // 4xx significa que esta inscripcion concreta no se puede hacer, y eso el
             // usuario si necesita saberlo.
-            if (e.code() >= 500) queueJoin(payload) else throw e
+            if (e.code() == 409) {
+                // A conflict can also mean full/closed. Only accept confirmed membership.
+                val refreshed = getActivityById(activityId, serverOnly = true)
+                if (refreshed?.joined == true && !refreshed.pendingSync) {
+                    ActivityChanges.notifyChanged()
+                    JoinResult.SYNCED
+                } else throw e
+            } else if (e.code() >= 500) queueJoin(payload) else throw e
         }
     }
 
@@ -144,6 +156,7 @@ class ActivityRepository(
         markJoinedLocally(payload.activityId, pendingSync = true)
 
         SyncScheduler.schedule(ApiClient.appContext)
+        ActivityChanges.notifyChanged()
         return JoinResult.QUEUED
     }
 
@@ -164,7 +177,10 @@ class ActivityRepository(
             ?: activityDao?.getActivityById(activityId)?.toActivity()
             ?: return   // No esta en ningun lado: no hay nada que marcar.
 
-        val updated = current.copy(joined = true, pendingSync = pendingSync)
+        val updated = current.copy(
+            joined = true, pendingSync = pendingSync,
+            participants = current.participants + if (current.joined || current.pendingSync) 0 else 1
+        )
         ActivityMemoryCache.put(updated)
         activityDao?.insertActivity(updated.toEntity())
     }
@@ -178,7 +194,8 @@ class ActivityRepository(
         radiusKm: Double = 10.0
     ): List<Activity> = withContext(Dispatchers.IO) {
         try {
-            val response = ApiClient.api.recommendations(
+            if (!online()) throw IOException("Offline")
+            val response = apiProvider().recommendations(
                 lat = latitude,
                 lon = longitude,
                 radiusKm = radiusKm
@@ -203,6 +220,8 @@ class ActivityRepository(
             activityDao?.insertActivities(activities.map { it.toEntity() })
 
             activities
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val cached = getCachedWithUpdatedDistances(latitude, longitude, radiusKm)
             if (cached.isNotEmpty()) {
@@ -221,7 +240,8 @@ class ActivityRepository(
         radiusKm: Double = 1.0
     ): List<Activity> = withContext(Dispatchers.IO) {
         try {
-            val response = ApiClient.api.nearbyActivities(
+            if (!online()) throw IOException("Offline")
+            val response = apiProvider().nearbyActivities(
                 lat = latitude,
                 lon = longitude,
                 radiusKm = radiusKm
@@ -240,6 +260,8 @@ class ActivityRepository(
             activityDao?.insertActivities(activities.map { it.toEntity() })
 
             activities
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val cached = getCachedWithUpdatedDistances(latitude, longitude, radiusKm)
             if (cached.isNotEmpty()) return@withContext cached
@@ -253,33 +275,40 @@ class ActivityRepository(
     suspend fun getActivityById(
         activityId: String,
         userLat: Double? = null,
-        userLon: Double? = null
+        userLon: Double? = null,
+        serverOnly: Boolean = false
     ): Activity? = withContext(Dispatchers.IO) {
-        ActivityMemoryCache.get(activityId)?.let { cached ->
-            return@withContext formatDistance(cached, userLat, userLon)
+        if (!online()) {
+            return@withContext if (serverOnly) null else
+                (activityDao?.getActivityById(activityId)?.toActivity() ?: ActivityMemoryCache.get(activityId))
+                    ?.let { formatDistance(it, userLat, userLon) }
         }
-
         try {
-            val response = ApiClient.api.getActivity(activityId, userLat, userLon)
+            val response = apiProvider().getActivity(activityId, userLat, userLon)
             if (response.isSuccessful && response.body() != null) {
                 val jsonObject = JSONObject(response.body().toString())
-                val activity = parseSingleActivity(jsonObject, userLat = userLat, userLon = userLon)
+                val parsed = parseSingleActivity(jsonObject, userLat = userLat, userLon = userLon)
+                val activity = if (serverOnly) parsed else mergeLocalMembership(parsed)
 
+                if (serverOnly && !activity.joined) return@withContext activity
                 ActivityMemoryCache.put(activity)
                 activityDao?.insertActivity(activity.toEntity())
 
                 return@withContext activity
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             // Ignore network errors to proceed to local fallback
         }
 
+        if (serverOnly) return@withContext null
         activityDao?.getActivityById(activityId)?.toActivity()?.let { storedActivity ->
             ActivityMemoryCache.put(storedActivity)
             return@withContext formatDistance(storedActivity, userLat, userLon)
         }
 
-        ActivityMemoryCache.snapshot().firstOrNull { it.id == activityId }
+        ActivityMemoryCache.get(activityId)?.let { formatDistance(it, userLat, userLon) }
     }
 
     /**
@@ -381,16 +410,10 @@ class ActivityRepository(
         userLon: Double,
         radiusKm: Double? = null
     ): List<Activity> {
-        var cached = ActivityMemoryCache.snapshot()
-
-        if (cached.isEmpty() && activityDao != null) {
-            val dbEntities = activityDao.getAllActivities().first()
-            if (dbEntities.isNotEmpty()) {
-                val mappedDomain = dbEntities.map { it.toActivity() }
-                ActivityMemoryCache.putAll(mappedDomain)
-                cached = mappedDomain
-            }
-        }
+        // Room contains the full persisted set; the bounded LRU may contain only a subset.
+        val stored = activityDao?.getAllActivities()?.first()?.map { it.toActivity() }
+        val cached = if (!stored.isNullOrEmpty()) stored else ActivityMemoryCache.snapshot()
+        ActivityMemoryCache.putAll(cached)
 
         if (cached.isEmpty()) return emptyList()
 
@@ -408,6 +431,13 @@ class ActivityRepository(
                 if (radiusKm == null) act else null
             }
         }
+    }
+
+    private suspend fun mergeLocalMembership(remote: Activity): Activity {
+        val local = activityDao?.getActivityById(remote.id)?.toActivity() ?: ActivityMemoryCache.get(remote.id)
+        return if (local?.pendingSync == true && !remote.joined) {
+            remote.copy(joined = true, pendingSync = true, participants = remote.participants + 1)
+        } else remote
     }
 
     private fun formatDistance(activity: Activity, userLat: Double?, userLon: Double?): Activity {
@@ -432,7 +462,7 @@ class ActivityRepository(
         return (distanceKm * 1000).toInt()
     }
 
-    private fun parseRecommendations(
+    private suspend fun parseRecommendations(
         json: String,
         recommendationId: String?,
         freeTimeMinutes: Int?,
@@ -455,19 +485,19 @@ class ActivityRepository(
                 userLat = userLat,
                 userLon = userLon
             )
-            activities.add(activity)
+            activities.add(mergeLocalMembership(activity))
         }
 
         return activities
     }
 
-    private fun parseNearbyActivities(json: String, userLat: Double, userLon: Double): List<Activity> {
+    private suspend fun parseNearbyActivities(json: String, userLat: Double, userLon: Double): List<Activity> {
         val array = JSONArray(json)
         val activities = mutableListOf<Activity>()
 
         for (i in 0 until array.length()) {
             val activityJson = array.getJSONObject(i)
-            activities.add(parseSingleActivity(activityJson, userLat = userLat, userLon = userLon))
+            activities.add(mergeLocalMembership(parseSingleActivity(activityJson, userLat = userLat, userLon = userLon)))
         }
 
         return activities

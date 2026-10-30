@@ -93,6 +93,7 @@ class PendingActionRepository(
                         if (response.code() == 201) {
                             pendingActionDao.deleteAction(action.id, userId)
                             syncedCount++
+                            ActivityChanges.notifyChanged()
                         } else {
                             pendingActionDao.updateAction(
                                 action.copy(retryCount = action.retryCount + 1)

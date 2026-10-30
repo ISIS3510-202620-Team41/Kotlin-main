@@ -32,6 +32,12 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.group41.kotlinapp.repository.ActivityChanges
+import com.group41.kotlinapp.connectivity.ConnectivityObserver
+import kotlinx.coroutines.flow.combine
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -104,6 +110,21 @@ fun RecommendationScreen(
 
     var errorMessage by remember {
         mutableStateOf<String?>(null)
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(userId, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            ActivityChanges.changes.combine(ConnectivityObserver(context).isOnline) { revision, online -> revision to online }.collect {
+                if (!userId.isNullOrBlank()) {
+                    viewModel.loadRecommendedActivities(
+                        userId = userId, latitude = 4.6382, longitude = -74.0840,
+                        onSuccess = { recommendations = it; isLoading = false },
+                        onError = { errorMessage = it; isLoading = false }
+                    )
+                }
+            }
+        }
     }
 
     // Automatically restores saved preferences from Room when the screen opens
@@ -426,7 +447,7 @@ fun RecommendationCard(
     viewModel: RecommendationsViewModel,
     onClick: () -> Unit
 ) {
-    var isJoined by remember(activity.id) {
+    var isJoined by remember(activity.id, activity.joined) {
         mutableStateOf(activity.joined)
     }
 
@@ -436,7 +457,7 @@ fun RecommendationCard(
      * Arranca con lo que trae la actividad y no en false, porque esa actividad pudo venir
      * de la base de datos local con una inscripcion que quedo pendiente la vez pasada.
      */
-    var isPendingSync by remember(activity.id) {
+    var isPendingSync by remember(activity.id, activity.pendingSync) {
         mutableStateOf(activity.pendingSync)
     }
 
@@ -554,13 +575,13 @@ fun RecommendationCard(
                             }
                         )
                     },
-                    enabled = !isJoined && !isJoining,
+                    enabled = !isJoined && !isPendingSync && !isJoining,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = LlamallaBlue,
                         contentColor = LlamallaBlack,
-                        disabledContainerColor = Color(0xFFD0E1E5),
+                        disabledContainerColor = Color(0xFFE0E0E0),
                         disabledContentColor = Color.Gray
                     )
                 ) {
