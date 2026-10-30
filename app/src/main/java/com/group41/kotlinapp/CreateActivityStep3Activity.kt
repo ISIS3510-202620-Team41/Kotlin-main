@@ -17,20 +17,16 @@ import com.google.android.material.button.MaterialButton
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.network.CreateActivityRequest
 import com.group41.kotlinapp.repository.PendingActionRepository
+import com.group41.kotlinapp.sync.SyncScheduler
 import kotlinx.coroutines.launch
 
 /**
  * Activity managing Step 3 of the Activity Creation process (Location Selection & Offline Queueing).
- *
- * Collects intent extras passed from Step 1 and Step 2, maps the chosen venue card to concrete
- * location coordinates, constructs a CreateActivityRequest, and enqueues the creation task in Room
- * via PendingActionRepository for eventual synchronization.
  */
 class CreateActivityStep3Activity : AppCompatActivity() {
 
     private var selectedLocationId: Int? = null
 
-    // Lazy initialization of PendingActionRepository using the application database singleton
     private val pendingActionRepository by lazy {
         PendingActionRepository(
             pendingActionDao = (application as App).database.pendingActionDao()
@@ -130,7 +126,6 @@ class CreateActivityStep3Activity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            // Trace intent extras accumulated from Step 1 and Step 2
             val title = intent.getStringExtra("EXTRA_TITLE") ?: "Nueva Actividad"
             val category = intent.getStringExtra(CreateActivityStep2Activity.EXTRA_SELECTED_CATEGORY) ?: "ENTRETENIMIENTO"
             val startTime = intent.getStringExtra("EXTRA_START_TIME") ?: "2026-11-15T18:00:00Z"
@@ -139,7 +134,6 @@ class CreateActivityStep3Activity : AppCompatActivity() {
             val price = intent.getStringExtra("EXTRA_PRICE") ?: "Gratis"
             val capacity = intent.getIntExtra("EXTRA_CAPACITY", 10)
 
-            // Map venue selection card ID to actual place metadata and geographic coordinates
             val (locationName, latitude, longitude) = when (selectedLocationId) {
                 R.id.card_bistro -> Triple("Bistro", 4.6010, -74.0650)
                 R.id.card_pizza_hut -> Triple("Pizza Hut", 4.6030, -74.0670)
@@ -161,10 +155,13 @@ class CreateActivityStep3Activity : AppCompatActivity() {
 
             lifecycleScope.launch {
                 try {
-                    // Queue creation task in Room database under actionType = "CREATE_ACTIVITY"
+                    // Queue creation task in Room database
                     pendingActionRepository.queueActivityCreation(userId, request)
 
-                    // User feedback toast as required by acceptance criteria
+                    // Schedule WorkManager synchronization task
+                    SyncScheduler.schedule(applicationContext)
+
+                    // User feedback toast
                     Toast.makeText(
                         this@CreateActivityStep3Activity,
                         "Actividad guardada localmente. Se publicará automáticamente al conectarse",
