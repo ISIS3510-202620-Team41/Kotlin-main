@@ -41,7 +41,10 @@ enum class PendingActionType {
     JOIN_ACTIVITY,
 
     /** El usuario creo una actividad sin tener internet. */
-    CREATE_ACTIVITY;
+    CREATE_ACTIVITY,
+
+    /** The activity already exists; retry only its JPEG upload. */
+    UPLOAD_ACTIVITY_PHOTO;
 
     companion object {
         /**

@@ -110,7 +110,7 @@ class ScheduleViewModel(
         }
     }
 
-    private fun expireSession() {
+    private suspend fun expireSession() {
         auth.clearSession()
         _state.update { it.copy(sessionExpired = true) }
     }

@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Carpetas que FileProvider puede compartir con otras apps.
-    Solo la carpeta temporal donde la app de cámara guarda la foto de perfil.
+    camera/ en caché para fotos de perfil temporales y activities/ en archivos
+    internos para fotos de actividades persistentes.
 -->
 <paths>
     <cache-path name="camera" path="camera/" />
+    <files-path name="activity_photos" path="activities/" />
 </paths>

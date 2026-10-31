@@ -72,6 +72,14 @@ interface ApiService {
     @POST("api/activities")
     suspend fun createActivity(@Body body: CreateActivityRequest): Response<JsonObject>
 
+    /** Upload the JPEG only after creation has supplied the backend activity ID. */
+    @Multipart
+    @POST("api/activities/{id}/image")
+    suspend fun uploadActivityImage(
+        @Path("id") activityId: String,
+        @Part file: MultipartBody.Part
+    ): Response<JsonObject>
+
     /**
      * recommendationId and freeTimeMinutes only if the user joins from the
      * recommendations list; from elsewhere they pass as null and Retrofit omits them.

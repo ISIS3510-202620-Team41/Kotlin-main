@@ -221,6 +221,26 @@
                 android:textColorHint="#999999"
                 android:textSize="14sp" />
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_add_activity_photo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:backgroundTint="@color/rosewood"
+                android:text="Agregar foto"
+                android:textAllCaps="false"
+                android:textColor="@color/white"
+                app:cornerRadius="14dp" />
+
+            <ImageView
+                android:id="@+id/iv_activity_photo"
+                android:layout_width="match_parent"
+                android:layout_height="160dp"
+                android:layout_marginBottom="12dp"
+                android:contentDescription="Foto de la actividad"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
+
             <androidx.constraintlayout.widget.ConstraintLayout
                 android:id="@+id/item_alex"
                 android:layout_width="match_parent"

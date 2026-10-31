@@ -131,6 +131,8 @@ class CreateActivityStep3Activity : AppCompatActivity() {
             val startTime = intent.getStringExtra("EXTRA_START_TIME") ?: "2026-11-15T18:00:00Z"
             val endTime = intent.getStringExtra("EXTRA_END_TIME") ?: "2026-11-15T20:00:00Z"
             val description = intent.getStringExtra("EXTRA_DESCRIPTION")
+            // Step 2 forwards this local file path from Step 1 unchanged.
+            val photoPath = intent.getStringExtra(CreateActivityStep1Activity.EXTRA_PHOTO_PATH)
             val price = intent.getStringExtra("EXTRA_PRICE") ?: "Gratis"
             val capacity = intent.getIntExtra("EXTRA_CAPACITY", 10)
 
@@ -156,7 +158,8 @@ class CreateActivityStep3Activity : AppCompatActivity() {
             lifecycleScope.launch {
                 try {
                     // Queue creation task in Room database
-                    pendingActionRepository.queueActivityCreation(userId, request)
+                    // Store the photo alongside the queued request, outside the backend DTO.
+                    pendingActionRepository.queueActivityCreation(userId, request, photoPath)
 
                     // Schedule WorkManager synchronization task
                     SyncScheduler.schedule(applicationContext)

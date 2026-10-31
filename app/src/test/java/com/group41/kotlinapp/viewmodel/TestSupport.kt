@@ -67,7 +67,7 @@ class FakeAuthRepository : AuthRepository {
         logoutCalls++
     }
 
-    override fun clearSession() {
+    override suspend fun clearSession() {
         clearCalls++
     }
 }

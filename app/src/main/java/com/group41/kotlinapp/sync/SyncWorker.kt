@@ -3,14 +3,13 @@ package com.group41.kotlinapp.sync
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.google.gson.Gson
 import com.group41.kotlinapp.App
+import com.group41.kotlinapp.AppPreferences
 import com.group41.kotlinapp.data.local.dao.ActivityDao
 import com.group41.kotlinapp.model.JoinPayload
 import com.group41.kotlinapp.model.PendingAction
 import com.group41.kotlinapp.model.PendingActionType
 import com.group41.kotlinapp.network.ApiClient
-import com.group41.kotlinapp.network.CreateActivityRequest
 import com.group41.kotlinapp.repository.PendingActionRepository
 import com.group41.kotlinapp.repository.ActivityRepository
 import com.group41.kotlinapp.repository.ActivityChanges
@@ -39,16 +38,31 @@ class SyncWorker(
         if (pending.isEmpty()) return Result.success()
 
         var shouldRetryLater = false
+        var allActionsSucceeded = true
 
         for (action in pending) {
-            when (send(action, activities)) {
+            val outcome = send(action, activities, queue)
+            // A rejected or discarded action is still a failed synchronization, even
+            // when removing it leaves the queue empty. Do not report that as success.
+            if (outcome != Outcome.DONE) allActionsSucceeded = false
+            when (outcome) {
                 Outcome.DONE -> queue.markSynced(action)
                 Outcome.REJECTED -> queue.discard(action)
                 Outcome.RETRY_LATER -> {
                     if (queue.recordFailure(action)) shouldRetryLater = true
                 }
                 Outcome.UNPROCESSABLE -> queue.discard(action)
+                // Retain the row and JPEG without requesting an automatic retry.
+                Outcome.KEEP_PENDING -> Unit
             }
+        }
+
+        // Read the actual database rows: pendingFor() skips malformed or unknown actions,
+        // and new actions may have arrived while this worker was sending the original list.
+        // An empty initial queue returns above because no synchronization took place.
+        if (allActionsSucceeded && app.database.pendingActionDao().getPendingActions(userId).isEmpty() &&
+            ApiClient.tokens.userId == userId) {
+            AppPreferences(app).saveLastSuccessfulSync(System.currentTimeMillis(), expectedUserId = userId)
         }
 
         return if (shouldRetryLater) Result.retry() else Result.success()
@@ -57,10 +71,10 @@ class SyncWorker(
     /**
      * Intenta ejecutar una acción contra el backend y dice cómo le fue.
      */
-    private suspend fun send(action: PendingAction, activities: ActivityDao): Outcome =
+    private suspend fun send(action: PendingAction, activities: ActivityDao, queue: PendingActionRepository): Outcome =
         when (action.type) {
             PendingActionType.JOIN_ACTIVITY -> sendJoin(action, activities)
-            PendingActionType.CREATE_ACTIVITY -> sendCreate(action)
+            PendingActionType.CREATE_ACTIVITY, PendingActionType.UPLOAD_ACTIVITY_PHOTO -> sendCreate(action, queue)
         }
 
     private suspend fun sendJoin(action: PendingAction, activities: ActivityDao): Outcome {
@@ -113,33 +127,17 @@ class SyncWorker(
     /**
      * Reconstruye la petición de creación desde el payload JSON y la envía al backend.
      */
-    private suspend fun sendCreate(action: PendingAction): Outcome {
-        val request = try {
-            Gson().fromJson(action.payload.toString(), CreateActivityRequest::class.java)
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            return Outcome.UNPROCESSABLE
-        } ?: return Outcome.UNPROCESSABLE
-
+    private suspend fun sendCreate(action: PendingAction, queue: PendingActionRepository): Outcome {
         return try {
-            val response = ApiClient.api.createActivity(request)
-
-            when (response.code()) {
-                201 -> {
-                    ActivityChanges.notifyChanged()
-                    Outcome.DONE
-                }
-                401, 403, 408, 429 -> Outcome.RETRY_LATER
-                in 500..599 -> Outcome.RETRY_LATER
-                in 400..499 -> Outcome.REJECTED
-                else -> Outcome.RETRY_LATER
-            }
+            // After HTTP 201, the repository saves the backend ID and local photo path
+            // in an UPLOAD_ACTIVITY_PHOTO row before uploading. Once saved, retries only upload.
+            // An interruption before that save still needs backend idempotency.
+            queue.syncActivityCreation(action)
+            Outcome.DONE
         } catch (e: CancellationException) {
             throw e
-        } catch (e: IOException) {
-            Outcome.RETRY_LATER
         } catch (e: Exception) {
-            Outcome.RETRY_LATER
+            creationFailureOutcome(e)
         }
     }
 
@@ -163,11 +161,29 @@ class SyncWorker(
         ActivityChanges.notifyChanged()
     }
 
-    /** Las cuatro cosas que pueden pasarle a una acción de la cola. */
-    private enum class Outcome {
+    /** Possible results, including retained actions that need correction before retrying. */
+    internal enum class Outcome {
         DONE,
         REJECTED,
         RETRY_LATER,
-        UNPROCESSABLE
+        UNPROCESSABLE,
+        KEEP_PENDING
+    }
+
+    companion object {
+        /** Retry known temporary failures; preserve validation failures and uncertain data. */
+        internal fun creationFailureOutcome(error: Exception): Outcome = when (error) {
+            is HttpException -> when (error.code()) {
+                // Authentication may recover after refresh; timeouts/rate limits are temporary.
+                401, 408, 425, 429 -> Outcome.RETRY_LATER
+                in 500..599 -> Outcome.RETRY_LATER
+                // Includes 400/422. Keep the payload and JPEG for a later explicit sync
+                // after correction, without starting an endless WorkManager retry loop.
+                else -> Outcome.KEEP_PENDING
+            }
+            is IOException -> Outcome.RETRY_LATER
+            // Missing IDs/files and parsing failures cannot safely justify discarding data.
+            else -> Outcome.KEEP_PENDING
+        }
     }
 }
