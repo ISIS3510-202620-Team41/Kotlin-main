@@ -3,17 +3,21 @@ package com.group41.kotlinapp
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -32,6 +36,23 @@ class CreateActivityStep1Activity : AppCompatActivity() {
     private var startTimeMillis: Long? = null
     private var endTimeMillis: Long? = null
 
+    // Keep an in-progress capture separate so cancelling a retake preserves the old photo.
+    private var pendingPhoto: File? = null
+    private var activityPhoto: File? = null
+
+    private val takePhoto = registerForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        val file = pendingPhoto ?: return@registerForActivityResult
+        pendingPhoto = null
+        if (saved && ActivityPhotoStorage.isValidPhoto(file)) {
+            ActivityPhotoStorage.deletePhotoFile(activityPhoto)
+            activityPhoto = file
+            showActivityPhoto()
+        } else {
+            // Cancelled or empty captures must not leave unused files behind.
+            ActivityPhotoStorage.deletePhotoFile(file)
+        }
+    }
+
     // Display format for human-readable input fields
     private val displayFormatter = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
@@ -47,6 +68,14 @@ class CreateActivityStep1Activity : AppCompatActivity() {
         }
 
         setContentView(R.layout.activity_create_activity_step1)
+
+        // Restore paths before Android delivers a camera result after recreation.
+        pendingPhoto = savedInstanceState?.getString(KEY_PENDING_PHOTO)?.let(::File)
+        activityPhoto = savedInstanceState?.getString(KEY_ACTIVITY_PHOTO)?.let(::File)
+        showActivityPhoto()
+        findViewById<MaterialButton>(R.id.btn_add_activity_photo).setOnClickListener {
+            openCamera()
+        }
 
         val root = findViewById<View>(R.id.main)
         val buttonsContainer = findViewById<View>(R.id.ll_buttons)
@@ -84,6 +113,37 @@ class CreateActivityStep1Activity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         startTimeMillis?.let { outState.putLong(KEY_START_TIME_MILLIS, it) }
         endTimeMillis?.let { outState.putLong(KEY_END_TIME_MILLIS, it) }
+        pendingPhoto?.let { outState.putString(KEY_PENDING_PHOTO, it.absolutePath) }
+        activityPhoto?.let { outState.putString(KEY_ACTIVITY_PHOTO, it.absolutePath) }
+    }
+
+    private fun openCamera() {
+        if (pendingPhoto != null) return
+        try {
+            // The storage helper supplies a UUID filename and a shareable FileProvider URI.
+            val file = ActivityPhotoStorage.newPhotoFile(this)
+            pendingPhoto = file
+            takePhoto.launch(ActivityPhotoStorage.uriFor(this, file))
+        } catch (e: Exception) {
+            // Also clean up if no camera app is available or storage cannot be prepared.
+            ActivityPhotoStorage.deletePhotoFile(pendingPhoto)
+            pendingPhoto = null
+            Toast.makeText(this, "No se pudo abrir la cámara", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showActivityPhoto() {
+        val preview = findViewById<ImageView>(R.id.iv_activity_photo)
+        val file = activityPhoto
+        if (ActivityPhotoStorage.isValidPhoto(file)) {
+            preview.setImageURI(Uri.fromFile(file))
+            preview.visibility = View.VISIBLE
+        } else {
+            ActivityPhotoStorage.deletePhotoFile(file)
+            activityPhoto = null
+            preview.setImageDrawable(null)
+            preview.visibility = View.GONE
+        }
     }
 
     /**
@@ -223,6 +283,10 @@ class CreateActivityStep1Activity : AppCompatActivity() {
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_START_TIME, startTimeIso)
                 putExtra(EXTRA_END_TIME, endTimeIso)
+                // Keep the captured file on disk for the following creation steps.
+                activityPhoto?.takeIf { ActivityPhotoStorage.isValidPhoto(it) }?.let {
+                    putExtra(EXTRA_PHOTO_PATH, it.absolutePath)
+                }
                 if (description.isNotBlank()) {
                     putExtra(EXTRA_DESCRIPTION, description)
                 }
@@ -236,7 +300,10 @@ class CreateActivityStep1Activity : AppCompatActivity() {
         const val EXTRA_START_TIME = "EXTRA_START_TIME"
         const val EXTRA_END_TIME = "EXTRA_END_TIME"
         const val EXTRA_DESCRIPTION = "EXTRA_DESCRIPTION"
+        const val EXTRA_PHOTO_PATH = "EXTRA_PHOTO_PATH"
 
+        private const val KEY_PENDING_PHOTO = "KEY_PENDING_PHOTO"
+        private const val KEY_ACTIVITY_PHOTO = "KEY_ACTIVITY_PHOTO"
         private const val KEY_START_TIME_MILLIS = "KEY_START_TIME_MILLIS"
         private const val KEY_END_TIME_MILLIS = "KEY_END_TIME_MILLIS"
     }

@@ -100,5 +100,6 @@ dependencies {
     // incluso si el usuario cierra la app. Lo usamos para reenviar las inscripciones
     // que quedaron guardadas mientras no habia internet.
     implementation(libs.work.runtime.ktx)
+    implementation(libs.androidx.datastore.preferences)
 
 }
