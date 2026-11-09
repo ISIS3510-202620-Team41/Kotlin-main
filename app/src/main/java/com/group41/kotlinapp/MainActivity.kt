@@ -252,6 +252,21 @@ fun RecommendationScreen(
                     ) {
                         Text("Cercanas")
                     }
+
+                    Button(
+                        onClick = {
+                            context.startActivity(
+                                Intent(context, FriendScheduleMatrixActivity::class.java)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = LlamallaRose,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Amigos")
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
