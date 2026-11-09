@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "738639818687",
+    "project_id": "llamalla-e17e9",
+    "storage_bucket": "llamalla-e17e9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:738639818687:android:3532bd21a833339c40fb0a",
+        "android_client_info": {
+          "package_name": "com.group41.kotlinapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCCpW4PyR00CRI4MWRdXLR5ikxiN5YS_wg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
