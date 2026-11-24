@@ -2,10 +2,29 @@ package com.group41.kotlinapp.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Delete
+import androidx.room.Embedded
 import androidx.room.Query
 import androidx.room.Update
 import androidx.room.Upsert
+import com.group41.kotlinapp.data.local.entity.ActivityEntity
 import com.group41.kotlinapp.data.local.entity.UserEnrollmentEntity
+import kotlinx.coroutines.flow.Flow
+
+/**
+ * Enrollment and activity details read together for My Activities.
+ * The activity can be missing from the local cache while the enrollment is still valid.
+ */
+data class EnrolledActivity(
+    val enrollmentActivityId: String,
+    val cancellationPending: Boolean,
+    val joinPending: Boolean,
+    val enrollmentJoined: Boolean,
+    val enrolledAt: Long?,
+    val canceledAt: Long?,
+    @Embedded val activity: ActivityEntity?
+) {
+    val isCanceled: Boolean get() = !enrollmentJoined && !cancellationPending && canceledAt != null
+}
 
 /**
  * Data Access Object (DAO) for managing user enrollments in the 'user_enrollments' table.
@@ -33,6 +52,29 @@ interface UserEnrollmentDao {
      */
     @Query("SELECT * FROM user_enrollments WHERE userId = :userId")
     suspend fun getForUser(userId: String): List<UserEnrollmentEntity>
+
+    /**
+     * Observes active, pending, and canceled enrollments for one account.
+     *
+     * The left join preserves enrollments whose activity details are missing from the cache.
+     * Completed cancellations remain available using their cancellation timestamp.
+     * Pending joins are identified by their entry in the shared offline action queue.
+     * Room emits a fresh list when any of the three tables changes during synchronization.
+     */
+    @Query("""
+        SELECT a.*, e.activityId AS enrollmentActivityId, e.cancellationPending,
+            e.joined AS enrollmentJoined, e.enrolledAt, e.canceledAt,
+            EXISTS (
+                SELECT 1 FROM pending_actions AS p
+                WHERE p.id = 'JOIN_ACTIVITY:' || e.userId || ':' || e.activityId
+                    AND p.userId = e.userId AND p.actionType = 'JOIN_ACTIVITY'
+            ) AS joinPending
+        FROM user_enrollments AS e
+        LEFT JOIN activities AS a ON a.id = e.activityId
+        WHERE e.userId = :userId AND (e.joined = 1 OR e.cancellationPending = 1 OR e.canceledAt IS NOT NULL)
+        ORDER BY e.cancellationPending DESC, a.startTime IS NULL, a.startTime, a.name, e.activityId
+    """)
+    fun observeEnrolledActivities(userId: String): Flow<List<EnrolledActivity>>
 
     /**
      * Checks whether a join or cancellation is queued for the specified user and activity.

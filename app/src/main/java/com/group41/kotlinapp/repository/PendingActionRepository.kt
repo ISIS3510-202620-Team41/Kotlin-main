@@ -70,7 +70,10 @@ class PendingActionRepository(
         val db = requireNotNull(database)
         db.withTransaction {
             if (!enrollmentPending(userId, activityId)) {
-                db.userEnrollmentDao().upsert(UserEnrollmentEntity(userId, activityId, joined))
+                val enrollments = db.userEnrollmentDao()
+                val previous = enrollments.get(userId, activityId)
+                    ?: UserEnrollmentEntity(userId, activityId, joined = false)
+                enrollments.upsert(previous.withConfirmedMembership(joined))
             }
         }
     }
@@ -97,15 +100,16 @@ class PendingActionRepository(
         // Both can then be restored together after an app restart.
         val action = withContext(NonCancellable) {
             db.withTransaction {
-                val existing = db.userEnrollmentDao().get(userId, id)
-                val confirmed = existing?.confirmedJoined ?: false
+                val enrollments = db.userEnrollmentDao()
+                val existing = enrollments.get(userId, id)
+                    ?: UserEnrollmentEntity(userId, id, joined = false)
                 // An opposing action replaces the previous request. Repeated requests
                 // for the same change keep one row through insertIfAbsent.
                 dao.deleteAction(oppositeId, userId)
                 dao.insertIfAbsent(PendingActionEntity(
                     actionId, userId, type.name, body.toString(), System.currentTimeMillis(), 0
                 ))
-                db.userEnrollmentDao().upsert(UserEnrollmentEntity(userId, id, joined, !joined, confirmed))
+                enrollments.upsert(existing.copy(joined = joined, cancellationPending = !joined))
                 checkNotNull(dao.getPendingActions(userId).first { it.id == actionId }.toDomainOrNull())
             }.also {
                 // Schedule background sync in case the immediate attempt is interrupted.
@@ -155,6 +159,7 @@ class PendingActionRepository(
         if (!isCurrentUser()) return IOException("La sesion cambio")
 
         var confirmedAfterConflict: Boolean? = null
+        var cancellationRemovedEnrollment = false
         val account = EnrollmentAccount(action.userId)
         val failure = try {
             if (join != null) {
@@ -164,6 +169,7 @@ class PendingActionRepository(
                 // The server returns 404 when the enrollment is already absent.
                 // This also covers a successful cancellation whose response was lost.
                 if (!response.isSuccessful && response.code() != 404) throw HttpException(response)
+                cancellationRemovedEnrollment = response.isSuccessful
             }
             null
         } catch (e: CancellationException) {
@@ -194,16 +200,41 @@ class PendingActionRepository(
         if (failure == null || !isTemporaryEnrollmentFailure(failure)) {
             withContext(NonCancellable) {
                 db.withTransaction {
-                    val previous = db.userEnrollmentDao().get(action.userId, id)
-                    val joined = if (failure == null) joining else
-                        confirmedAfterConflict ?: previous?.confirmedJoined ?: !joining
-                    db.userEnrollmentDao().upsert(UserEnrollmentEntity(action.userId, id, joined))
+                    val enrollments = db.userEnrollmentDao()
+                    val previous = enrollments.get(action.userId, id)
+                        ?: UserEnrollmentEntity(action.userId, id, joined = !joining)
+                    val updated = if (failure == null) {
+                        previous.withConfirmedMembership(joining, cancellationRemovedEnrollment)
+                    } else {
+                        val confirmed = confirmedAfterConflict ?: previous.confirmedJoined
+                        previous.copy(joined = confirmed, cancellationPending = false, confirmedJoined = confirmed)
+                    }
+                    enrollments.upsert(updated)
                     dao.deleteAction(action.id, action.userId)
                 }
             }
         }
         ActivityChanges.notifyChanged()
         return failure
+    }
+
+    /**
+     * Records confirmed membership transitions while retaining the latest cancellation.
+     * A 404 after reversing an unsent join leaves no history because there is no evidence
+     * that the user ever enrolled. A 404 for a known enrollment still confirms its removal.
+     */
+    private fun UserEnrollmentEntity.withConfirmedMembership(
+        joined: Boolean,
+        cancellationRemovedEnrollment: Boolean = false
+    ): UserEnrollmentEntity {
+        val now = System.currentTimeMillis()
+        return copy(
+            joined = joined,
+            cancellationPending = false,
+            confirmedJoined = joined,
+            enrolledAt = if (joined && (!confirmedJoined || enrolledAt == null)) now else enrolledAt,
+            canceledAt = if (!joined && (confirmedJoined || cancellationRemovedEnrollment)) now else canceledAt
+        )
     }
 
     private fun isTemporaryEnrollmentFailure(error: Exception): Boolean =

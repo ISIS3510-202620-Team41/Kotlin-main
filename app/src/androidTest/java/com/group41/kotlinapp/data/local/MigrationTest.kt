@@ -24,7 +24,7 @@ import org.junit.runner.RunWith
  * ejecutarlo en un emulador o en un telefono conectado.
  *
  * Opens a version 1 database that lacks pendingSync and verifies that the
- * current app can migrate it to version 3 without losing cached activities.
+ * current app can migrate it to version 4 without losing cached activities.
  *
  * Si la migracion estuviera mal, el sintoma seria el peor posible: la app se cerraria
  * nada mas abrirse, en los telefonos de quienes ya la usaban, y no en el del desarrollador
@@ -50,7 +50,7 @@ class MigrationTest {
     }
 
     @Test
-    fun migrarDeLaVersion1ALa3ConservaLasActividadesGuardadas() {
+    fun migrarDeLaVersion1ALa4ConservaLasActividadesGuardadas() {
         // --- 1. Se fabrica a mano una base como la que tendria un usuario con la app vieja.
         crearBaseVersion1 { db ->
             db.execSQL(
@@ -60,9 +60,9 @@ class MigrationTest {
             )
         }
 
-        // 2. Open the database with Room and run both migrations.
+        // 2. Open the database with Room and run the registered migrations.
         val database = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
 
         try {

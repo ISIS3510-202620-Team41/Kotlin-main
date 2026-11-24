@@ -82,3 +82,10 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         )
     }
 }
+/** Adds enrollment history timestamps. Version 3 did not record when changes took place. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE user_enrollments ADD COLUMN enrolledAt INTEGER")
+        db.execSQL("ALTER TABLE user_enrollments ADD COLUMN canceledAt INTEGER")
+    }
+}
