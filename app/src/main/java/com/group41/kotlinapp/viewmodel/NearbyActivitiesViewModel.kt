@@ -68,9 +68,7 @@ class NearbyActivitiesViewModel(application: Application) : AndroidViewModel(app
         // Se pasa tambien aqui para que el repositorio se comporte igual sin importar
         // desde que pantalla se use: una inscripcion hecha desde la busqueda por cercania
         // tiene que guardarse sin internet exactamente como la hecha desde el detalle.
-        pendingActions = PendingActionRepository(
-            (application as App).database.pendingActionDao()
-        )
+        pendingActions = PendingActionRepository(application.database)
     )
 
     private val locationProvider = LocationProvider(application)

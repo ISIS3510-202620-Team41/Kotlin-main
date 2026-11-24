@@ -40,6 +40,9 @@ enum class PendingActionType {
     /** El usuario toco "Unirme" en una actividad sin tener internet. */
     JOIN_ACTIVITY,
 
+    /** The user requested to leave an activity. */
+    CANCEL_ENROLLMENT,
+
     /** El usuario creo una actividad sin tener internet. */
     CREATE_ACTIVITY,
 
@@ -83,5 +86,18 @@ data class JoinPayload(
                 freeTimeMinutes = json.optInt(KEY_FREE_TIME_MINUTES, -1).takeIf { it >= 0 }
             )
         }
+    }
+}
+
+/**
+ * The payload replayed by the worker when cancelling an enrollment.
+ * The queue row already identifies the user, so the payload stores only the activity ID.
+ */
+data class CancelEnrollmentPayload(val activityId: String) {
+    fun toJson(): JSONObject = JSONObject().put("activityId", activityId)
+
+    companion object {
+        fun fromJson(json: JSONObject): CancelEnrollmentPayload? =
+            json.optString("activityId").takeIf { it.isNotBlank() }?.let(::CancelEnrollmentPayload)
     }
 }

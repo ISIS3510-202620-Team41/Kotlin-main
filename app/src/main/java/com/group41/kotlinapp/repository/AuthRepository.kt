@@ -6,6 +6,7 @@ import com.group41.kotlinapp.network.ApiService
 import com.group41.kotlinapp.network.LoginRequest
 import com.group41.kotlinapp.network.RegisterRequest
 import com.group41.kotlinapp.network.UserDto
+import com.group41.kotlinapp.sync.SyncScheduler
 
 /**
  * Sesión del usuario: login, registro y logout.
@@ -37,6 +38,8 @@ class ApiAuthRepository(
         // Keep the UUID in DataStore as well, so screens can observe the current account.
         // TokenStore still provides the synchronous token access used by authentication.
         preferences.saveUserId(response.user.id)
+        // Resume pending actions for this account after sign-in.
+        SyncScheduler.schedule(ApiClient.appContext)
         return response.user
     }
 

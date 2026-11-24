@@ -2,6 +2,8 @@ package com.group41.kotlinapp.data.local
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import com.group41.kotlinapp.data.local.dao.UserEnrollmentDao
+import com.group41.kotlinapp.data.local.entity.UserEnrollmentEntity
 import com.group41.kotlinapp.data.local.dao.ActivityDao
 import com.group41.kotlinapp.data.local.dao.PreferencesDao
 import com.group41.kotlinapp.data.local.entity.ActivityEntity
@@ -14,14 +16,8 @@ import com.group41.kotlinapp.data.local.entity.PendingActionEntity
  * Serves as the database holder and main access point to the underlying persisted data.
  */
 @Database(
-    entities = [ActivityEntity::class, UserPreferenceEntity::class
-    , PendingActionEntity::class
-    ],
-    // La version sube cada vez que cambia la forma de alguna tabla. Pasa a 2 porque se
-    // agrego la columna `pendingSync` a `activities`. Por cada salto de version tiene que
-    // existir una migracion en Migrations.kt, o la app se cerrara al abrirse en un telefono
-    // que ya tenia la version anterior instalada.
-    version = 2,
+    entities = [ActivityEntity::class, UserPreferenceEntity::class, PendingActionEntity::class, UserEnrollmentEntity::class],
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -52,4 +48,7 @@ abstract class AppDatabase : RoomDatabase() {
      * the database instance.
      */
     abstract fun pendingActionDao(): PendingActionDao
+
+    /** Provides the Room DAO for account-scoped enrollment records. */
+    abstract fun userEnrollmentDao(): UserEnrollmentDao
 }
