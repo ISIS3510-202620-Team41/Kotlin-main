@@ -17,7 +17,7 @@ import com.group41.kotlinapp.data.local.entity.PendingActionEntity
  */
 @Database(
     entities = [ActivityEntity::class, UserPreferenceEntity::class, PendingActionEntity::class, UserEnrollmentEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
