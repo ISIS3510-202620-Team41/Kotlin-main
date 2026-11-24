@@ -14,7 +14,14 @@ class LoginViewModelTest {
     val mainDispatcher = MainDispatcherRule()
 
     private val auth = FakeAuthRepository()
-    private val viewModel = LoginViewModel(auth)
+
+    /**
+     * Si el test finge tener conexion. Los tests de abajo asumen que si, porque prueban lo
+     * que contesta el backend; el ultimo lo pone en false para probar el caso sin red.
+     */
+    private var hayConexion = true
+
+    private val viewModel = LoginViewModel(auth, online = { hayConexion })
 
     @Test
     fun `datos invalidos muestran errores y no llaman al backend`() {
@@ -76,5 +83,25 @@ class LoginViewModelTest {
 
         assertNull(viewModel.state.value.error)
         assertTrue(viewModel.state.value.loggedIn)
+    }
+
+    @Test
+    fun `sin conexion no se llama al backend y se explica como entrar sin internet`() {
+        hayConexion = false
+
+        viewModel.login("ana@uniandes.edu.co", "contrasena123")
+
+        val state = viewModel.state.value
+
+        // Lo importante es que NO se intento la peticion: sin esta comprobacion el usuario
+        // esperaria el tiempo de espera completo de la red para acabar en un error generico.
+        assertTrue(auth.logins.isEmpty())
+        assertFalse(state.loading)
+        assertFalse(state.loggedIn)
+
+        // Y el mensaje tiene que decirle que lo que falta es conexion, no que se equivoco
+        // de contrasena, y que si ya habia entrado antes puede entrar sin internet.
+        assertTrue(state.error.orEmpty().contains("Sin conexion"))
+        assertTrue(state.error.orEmpty().contains("sin internet"))
     }
 }

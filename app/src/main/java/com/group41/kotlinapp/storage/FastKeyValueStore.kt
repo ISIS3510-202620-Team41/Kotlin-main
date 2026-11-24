@@ -125,6 +125,21 @@ object FastKeyValueStore {
     fun counter(counterKey: String): Long = store?.decodeLong(counterKey, 0L) ?: 0L
 
     /**
+     * Guarda de golpe los cuatro contadores de un cache.
+     *
+     * Se escriben juntos y no uno a uno desde quien llama para que la clave la construya
+     * un solo sitio: si el nombre de una clave se escribiera distinto al guardar y al
+     * leer, el contador se perderia sin que nada fallara.
+     */
+    fun putCounters(prefix: String, hits: Long, misses: Long, stale: Long, evictions: Long) {
+        val kv = store ?: return
+        kv.encode("$prefix.hits", hits)
+        kv.encode("$prefix.misses", misses)
+        kv.encode("$prefix.stale", stale)
+        kv.encode("$prefix.evictions", evictions)
+    }
+
+    /**
      * Cuanto ocupa el archivo en disco, en bytes.
      *
      * MMKV reserva espacio por paginas, asi que este numero es el tamaño del archivo,

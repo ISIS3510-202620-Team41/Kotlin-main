@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
+import com.group41.kotlinapp.cache.CacheRegistry
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.storage.AppSettings
 import com.group41.kotlinapp.storage.DataExporter
@@ -104,6 +105,10 @@ private fun SettingsScreen(
     var useMiles by remember { mutableStateOf(settings.useMiles) }
     var notifyOnSync by remember { mutableStateOf(settings.notifyOnSync) }
 
+    // Se lee una vez al abrir la pantalla, no en cada recomposicion: son contadores, no un
+    // flujo al que suscribirse.
+    var cacheStats by remember { mutableStateOf(CacheRegistry.snapshots()) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -162,6 +167,41 @@ private fun SettingsScreen(
             fontSize = 12.sp,
             color = Color.Gray
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Las metricas de las caches se muestran en pantalla a proposito: es lo que permite
+        // afirmar la tasa de acierto con un numero medido en vez de suponerla.
+        Text(text = "Caches", fontSize = 15.sp)
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        if (cacheStats.isEmpty()) {
+            Text(
+                text = "Todavia no se ha consultado ninguna.",
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+        } else {
+            cacheStats.forEach { snapshot ->
+                Text(text = snapshot.toString(), fontSize = 12.sp, color = Color.Gray)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = {
+                CacheRegistry.resetAll()
+                // Se vuelve a leer para que la pantalla muestre los ceros. Las metricas no
+                // son un Flow: son contadores que se consultan, no un estado al que
+                // suscribirse, asi que hay que pedirlas otra vez a mano.
+                cacheStats = CacheRegistry.snapshots()
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Reiniciar metricas")
+        }
     }
 }
 

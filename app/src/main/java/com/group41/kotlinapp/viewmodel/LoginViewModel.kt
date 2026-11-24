@@ -25,7 +25,16 @@ data class LoginUiState(
 )
 
 class LoginViewModel(
-    private val auth: AuthRepository = ApiAuthRepository()
+    private val auth: AuthRepository = ApiAuthRepository(),
+    /**
+     * Si hay conexion, como una funcion y no llamando directamente a ApiClient.
+     *
+     * Hace falta por lo mismo que en ActivityRepository: `ApiClient.isOnline()` necesita el
+     * contexto de Android, que en una prueba de escritorio no existe. Con la comprobacion
+     * detras de una funcion, el test pasa la suya y puede probar los dos casos, con red y
+     * sin ella, sin emulador.
+     */
+    private val online: () -> Boolean = { ApiClient.isOnline() }
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(LoginUiState())
@@ -51,7 +60,7 @@ class LoginViewModel(
         // y por eso el mensaje lo dice: el usuario que ya habia entrado antes no tiene que
         // escribir nada, y quien nunca entro sabe que lo que le falta es conexion y no que
         // se equivoco de contrasena.
-        if (!ApiClient.isOnline()) {
+        if (!online()) {
             _state.update {
                 it.copy(
                     loading = false,
