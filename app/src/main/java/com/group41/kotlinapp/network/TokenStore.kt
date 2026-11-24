@@ -52,6 +52,27 @@ class TokenStore(context: Context) {
         get() = prefs.getBoolean("google_connected", false)
         set(value) = prefs.edit { putBoolean("google_connected", value) }
 
+    // Read the account and token under the same lock so a concurrent sign-in
+    // or sign-out cannot pair one user's ID with another user's token.
+    internal fun accessFor(account: EnrollmentAccount): String? = synchronized(lock) {
+        if (userId == account.userId) access else null
+    }
+
+    internal fun refreshFor(account: EnrollmentAccount): String? = synchronized(lock) {
+        if (userId == account.userId) refresh else null
+    }
+
+    // A delayed refresh may update only the session that requested it.
+    internal fun saveFor(account: EnrollmentAccount, response: AuthResponse): Boolean = synchronized(lock) {
+        if (userId != account.userId || response.user.id != account.userId) return@synchronized false
+        save(response)
+        true
+    }
+
+    internal fun clearFor(account: EnrollmentAccount) = synchronized(lock) {
+        if (userId == account.userId) clear()
+    }
+
     fun save(response: AuthResponse) {
         synchronized(lock) {
             // Encrypt both before changing storage, then save the pair together. The

@@ -40,7 +40,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.group41.kotlinapp.repository.ActivityChanges
-import com.group41.kotlinapp.data.local.toActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -83,7 +82,6 @@ import kotlinx.coroutines.withContext
  * - Carga de forma transparente desde la base de datos local Room si el proceso de la app fue reiniciado.
  * - Renderiza imágenes en disco previamente descaragas usando Coil.
  * - Calcula distancias de manera local vía Haversine.
- * - Solo actualiza el estado local de inscripción ('joined') tras confirmación exitosa de la API.
  */
 class ActivityDetailActivity : ComponentActivity() {
 
@@ -171,13 +169,10 @@ fun ActivityDetailScreen(
      */
     val joinScope = rememberCoroutineScope()
     val repository = remember {
+        val database = (context.applicationContext as App).database
         ActivityRepository(
-            activityDao = (context.applicationContext as App).database.activityDao(),
-            // Esta es la pantalla donde el usuario toca "Unirme", asi que es la que mas
-            // necesita el buzon: es aqui donde la inscripcion sin internet se guarda.
-            pendingActions = PendingActionRepository(
-                (context.applicationContext as App).database.pendingActionDao()
-            )
+            activityDao = database.activityDao(),
+            pendingActions = PendingActionRepository(database)
         )
     }
 
@@ -196,17 +191,6 @@ fun ActivityDetailScreen(
             }
         }
     }
-    LaunchedEffect(activityId) {
-        (context.applicationContext as App).database.activityDao().getAllActivities().collect { rows ->
-            rows.firstOrNull { it.id == activityId }?.toActivity()?.let { stored ->
-                activity = stored
-                isJoined = stored.joined
-                isPendingSync = stored.pendingSync
-                isLoading = false
-            }
-        }
-    }
-
     Scaffold(
         modifier = Modifier.fillMaxSize()
     ) { innerPadding ->
@@ -278,8 +262,7 @@ fun ActivityDetailScreen(
                         }
                     }
 
-                    // Botón Volver
-                    IconButton(
+                    Button(
                         onClick = onBackClick,
                         modifier = Modifier
                             .padding(16.dp)
@@ -441,47 +424,37 @@ fun ActivityDetailScreen(
 
                     Spacer(modifier = Modifier.height(28.dp))
 
-                    // Botón de Unirse
+                    // Enrollment action
                     Button(
                         onClick = {
+                            // Tap the button again to reverse a pending enrollment change.
+                            val joining = !isJoined
                             isJoining = true
                             joinMessage = null
                             joinScope.launch {
                                 try {
-                                    // joinActivity ya no devuelve solo "funciono o no": dice
-                                    // tambien si la inscripcion salio de verdad al servidor
-                                    // o si quedo guardada esperando que vuelva el internet.
-                                    val result = repository.joinActivity(
-                                        activityId = act.id,
-                                        recommendationId = act.recommendationId,
-                                        freeTimeMinutes = act.freeTimeMinutes
-                                    )
-                                    activity = repository.getActivityById(act.id) ?: activity
-                                    isJoined = true
-                                    isJoining = false
-                                    isPendingSync = result == JoinResult.QUEUED
-
-                                    // Dos mensajes distintos porque son dos situaciones
-                                    // distintas. Decir "exitosamente" cuando el servidor ni
-                                    // se ha enterado seria mentirle al usuario, y si la
-                                    // actividad se llena mientras tanto se llevaria una
-                                    // sorpresa al llegar.
-                                    joinMessage = if (result == JoinResult.QUEUED) {
-                                        "Guardado sin conexion. Se enviara solo cuando vuelva el internet."
+                                    val result = if (joining) {
+                                        repository.joinActivity(act.id, act.recommendationId, act.freeTimeMinutes)
                                     } else {
-                                        "¡Te has unido exitosamente!"
+                                        repository.cancelEnrollment(act.id)
                                     }
-                                } catch (e: Exception) {
-                                    // Solo se llega aqui cuando el backend rechazo la
-                                    // inscripcion (la actividad se lleno, ya estabas
-                                    // inscrito). Los fallos de red no caen aqui: esos los
-                                    // guarda el repositorio en la cola.
+                                    isJoined = joining
+                                    isPendingSync = result == JoinResult.QUEUED
+                                    repository.getActivityById(act.id)?.let { loaded ->
+                                        activity = loaded
+                                        isJoined = loaded.joined
+                                        isPendingSync = loaded.pendingSync
+                                    }
+                                } catch (error: kotlinx.coroutines.CancellationException) {
+                                    throw error
+                                } catch (error: Exception) {
+                                    joinMessage = error.message ?: "No se pudo actualizar la inscripcion"
+                                } finally {
                                     isJoining = false
-                                    joinMessage = e.message ?: "Error al inscribirse"
                                 }
                             }
                         },
-                        enabled = !isJoined && !isPendingSync && !isJoining,
+                        enabled = !isJoining,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(54.dp),
@@ -494,13 +467,11 @@ fun ActivityDetailScreen(
                         )
                     ) {
                         Text(
-                            // El estado "inscrito pero pendiente" se dice con todas sus
-                            // letras en vez de con el visto de siempre. El usuario tiene
-                            // derecho a saber que su cupo todavia no esta confirmado.
                             text = when {
-                                isJoining -> "Inscribiendo..."
-                                isJoined && isPendingSync -> "Inscrito (pendiente de sincronizar)"
-                                isJoined -> "Inscrito a esta actividad ✓"
+                                isJoining -> "Actualizando inscripcion..."
+                                isJoined && isPendingSync -> "Inscripcion pendiente · Cancelar"
+                                isPendingSync -> "Cancelacion pendiente · Volver a unirme"
+                                isJoined -> "Cancelar inscripcion"
                                 else -> "Unirme a esta actividad"
                             },
                             fontSize = 16.sp,
@@ -513,15 +484,7 @@ fun ActivityDetailScreen(
                         Text(
                             text = msg,
                             fontSize = 14.sp,
-                            // Tres colores para tres significados: verde cuando el servidor
-                            // confirmo, ambar cuando esta guardado pero sin confirmar, y rojo
-                            // cuando fallo. Pintar el pendiente de verde lo haria pasar por
-                            // confirmado, que es justo lo que se quiere evitar.
-                            color = when {
-                                isJoined && isPendingSync -> Color(0xFFB26A00)
-                                isJoined -> Color(0xFF2E7D32)
-                                else -> MaterialTheme.colorScheme.error
-                            },
+                            color = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Medium
                         )
                     }

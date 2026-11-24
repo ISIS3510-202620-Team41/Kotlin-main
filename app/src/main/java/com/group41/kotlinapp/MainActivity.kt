@@ -560,12 +560,13 @@ fun RecommendationCard(
                         isJoining = true
                         joinError = null
 
-                        viewModel.joinActivity(
+                        // Allow users to reverse a pending join or cancellation from the card.
+                        val joining = !isJoined
+                        viewModel.changeEnrollment(
                             activity = activity,
-                            // queued = true significa que no habia internet y la inscripcion
-                            // se guardo para mandarla despues.
+                            joined = joining,
                             onSuccess = { queued ->
-                                isJoined = true
+                                isJoined = joining
                                 isJoining = false
                                 isPendingSync = queued
                             },
@@ -575,7 +576,7 @@ fun RecommendationCard(
                             }
                         )
                     },
-                    enabled = !isJoined && !isPendingSync && !isJoining,
+                    enabled = !isJoining,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -586,12 +587,11 @@ fun RecommendationCard(
                     )
                 ) {
                     Text(
-                        // "Pendiente" y no "Unido" mientras el servidor no confirme: el
-                        // reloj dice que esta guardado pero todavia en camino.
                         text = when {
-                            isJoining -> "Uniendo..."
-                            isJoined && isPendingSync -> "Pendiente de enviar ⏱"
-                            isJoined -> "Unido ✓"
+                            isJoining -> "Actualizando..."
+                            isJoined && isPendingSync -> "Inscripcion pendiente · Cancelar"
+                            isPendingSync -> "Cancelacion pendiente · Volver a unirme"
+                            isJoined -> "Cancelar inscripcion"
                             else -> "Unirme"
                         }
                     )

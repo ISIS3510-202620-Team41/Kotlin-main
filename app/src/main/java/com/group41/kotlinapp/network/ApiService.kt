@@ -14,7 +14,11 @@ import retrofit2.http.POST
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Tag
 import java.util.TimeZone
+
+/** Identifies the account that must authenticate an enrollment request. */
+data class EnrollmentAccount(val userId: String)
 
 interface ApiService {
     @POST("api/auth/login")
@@ -66,7 +70,8 @@ interface ApiService {
     suspend fun getActivity(
         @Path("id") activityId: String,
         @Query("lat") lat: Double? = null,
-        @Query("lon") lon: Double? = null
+        @Query("lon") lon: Double? = null,
+        @Tag account: EnrollmentAccount? = null
     ): Response<JsonObject>
 
     @POST("api/activities")
@@ -88,8 +93,16 @@ interface ApiService {
     suspend fun join(
         @Path("id") activityId: String,
         @Query("recommendationId") recommendationId: String? = null,
-        @Query("freeTimeMinutes") freeTimeMinutes: Int? = null
+        @Query("freeTimeMinutes") freeTimeMinutes: Int? = null,
+        @Tag account: EnrollmentAccount? = null
     ): JsonObject
+
+    /** Cancels the authenticated user's enrollment in the specified activity. */
+    @DELETE("api/activities/{id}/leave")
+    suspend fun leave(
+        @Path("id") activityId: String,
+        @Tag account: EnrollmentAccount? = null
+    ): Response<Unit>
 
     @POST("api/schedules/sync/google")
     suspend fun syncGoogle(

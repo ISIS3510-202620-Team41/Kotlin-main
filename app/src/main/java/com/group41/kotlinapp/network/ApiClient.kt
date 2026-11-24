@@ -115,8 +115,14 @@ object ApiClient {
             .readTimeout(60, TimeUnit.SECONDS)
             // Agrega "Authorization: Bearer <token>" a todas las peticiones
             .addInterceptor { chain ->
-                val builder = chain.request().newBuilder()
-                tokens.access?.let { builder.header("Authorization", "Bearer $it") }
+                val request = chain.request()
+                val builder = request.newBuilder()
+                // The active account may have changed since the worker read the queue.
+                // The tag ensures that the request uses the action owner's token.
+                val account = request.tag(EnrollmentAccount::class.java)
+                val access = if (account == null) tokens.access else
+                    tokens.accessFor(account) ?: throw IOException("Enrollment account is no longer signed in")
+                access?.let { builder.header("Authorization", "Bearer $it") }
                 chain.proceed(builder.build())
             }
             // Si el backend responde 401, refresca el token y reintenta una vez
@@ -184,12 +190,14 @@ object ApiClient {
 
         // Si otra petición ya refrescó mientras esperábamos, usar ese token
         val sent = response.request.header("Authorization")?.removePrefix("Bearer ")
-        val current = tokens.access
+        // Apply the same account check before refreshing the token after a 401.
+        val account = response.request.tag(EnrollmentAccount::class.java)
+        val current = if (account == null) tokens.access else tokens.accessFor(account) ?: return null
         if (current != null && current != sent) {
             return response.request.newBuilder().header("Authorization", "Bearer $current").build()
         }
 
-        val refreshToken = tokens.refresh ?: return null
+        val refreshToken = (if (account == null) tokens.refresh else tokens.refreshFor(account)) ?: return null
         val result = try {
             refreshApi.refresh(RefreshRequest(refreshToken)).execute()
         } catch (e: IOException) {
@@ -197,12 +205,12 @@ object ApiClient {
         }
         val body = result.body()
         if (result.code() == 401 || result.code() == 400) {
-            tokens.clear() // el refresh también venció: hay que volver al login
+            if (account == null) tokens.clear() else tokens.clearFor(account)
             return null
         }
         // Un 5xx no significa que la sesión murió: no se cierra, se reintenta luego.
         if (!result.isSuccessful || body == null) return null
-        tokens.save(body)
+        if (account == null) tokens.save(body) else if (!tokens.saveFor(account, body)) return null
         return response.request.newBuilder()
             .header("Authorization", "Bearer ${body.accessToken}")
             .build()

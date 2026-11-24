@@ -23,9 +23,8 @@ import org.junit.runner.RunWith
  * correr en el computador: necesita el SQLite de verdad de Android, asi que hay que
  * ejecutarlo en un emulador o en un telefono conectado.
  *
- * Lo que simula es exactamente lo que le pasa a alguien que ya tenia la app instalada:
- * su telefono tiene la base en la version 1, sin la columna `pendingSync`, y al actualizar
- * se encuentra con un codigo que espera la version 2.
+ * Opens a version 1 database that lacks pendingSync and verifies that the
+ * current app can migrate it to version 3 without losing cached activities.
  *
  * Si la migracion estuviera mal, el sintoma seria el peor posible: la app se cerraria
  * nada mas abrirse, en los telefonos de quienes ya la usaban, y no en el del desarrollador
@@ -51,7 +50,7 @@ class MigrationTest {
     }
 
     @Test
-    fun migrarDeLaVersion1ALa2ConservaLasActividadesGuardadas() {
+    fun migrarDeLaVersion1ALa3ConservaLasActividadesGuardadas() {
         // --- 1. Se fabrica a mano una base como la que tendria un usuario con la app vieja.
         crearBaseVersion1 { db ->
             db.execSQL(
@@ -61,11 +60,9 @@ class MigrationTest {
             )
         }
 
-        // --- 2. Se abre con el codigo actual, que espera la version 2.
-        // Si la migracion no sirviera, esta linea lanzaria la excepcion de Room y el test
-        // fallaria aqui mismo.
+        // 2. Open the database with Room and run both migrations.
         val database = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
 
         try {

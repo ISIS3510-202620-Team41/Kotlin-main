@@ -49,3 +49,36 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         db.execSQL("ALTER TABLE activities ADD COLUMN pendingSync INTEGER NOT NULL DEFAULT 0")
     }
 }
+
+/** Adds the enrollment table and backfills pending joins without changing existing rows. */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS user_enrollments (
+                userId TEXT NOT NULL,
+                activityId TEXT NOT NULL,
+                joined INTEGER NOT NULL,
+                cancellationPending INTEGER NOT NULL,
+                confirmedJoined INTEGER NOT NULL,
+                PRIMARY KEY (userId, activityId)
+            )
+            """.trimIndent()
+        )
+        // Sprint 3 stored pending joins under JOIN_ACTIVITY:userId:activityId.
+        // The queue ID identifies the account. Cached activities did not store an account ID,
+        // so existing confirmed memberships are recovered on the next server refresh.
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO user_enrollments
+                (userId, activityId, joined, cancellationPending, confirmedJoined)
+            SELECT userId, substr(id, length('JOIN_ACTIVITY:' || userId || ':') + 1), 1, 0, 0
+            FROM pending_actions
+            WHERE actionType = 'JOIN_ACTIVITY'
+              AND substr(id, 1, length('JOIN_ACTIVITY:' || userId || ':')) =
+                  'JOIN_ACTIVITY:' || userId || ':'
+              AND length(id) > length('JOIN_ACTIVITY:' || userId || ':')
+            """.trimIndent()
+        )
+    }
+}
