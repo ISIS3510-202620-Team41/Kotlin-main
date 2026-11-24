@@ -1,6 +1,7 @@
 package com.group41.kotlinapp.viewmodel
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.group41.kotlinapp.App
@@ -8,6 +9,7 @@ import com.group41.kotlinapp.location.LocationProvider
 import com.group41.kotlinapp.location.LocationResult
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.data.local.entity.SearchHistoryEntity
 import com.group41.kotlinapp.repository.ActivityRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,7 +54,17 @@ data class NearbyUiState(
      * Se muestra en pantalla a proposito: es la prueba visible de que el calculo de
      * distancias corre fuera del hilo de la interfaz y aun asi termina al instante.
      */
-    val elapsedMillis: Long? = null
+    val elapsedMillis: Long? = null,
+
+    /**
+     * Si la posicion usada no es de ahora, cuanto tiempo tiene en milisegundos.
+     *
+     * Es nulo cuando la posicion se acaba de medir, que es el caso normal. Tiene valor
+     * cuando el sensor no respondio y se recurrio a la ultima posicion guardada: la
+     * pantalla lo avisa, porque los resultados son "cerca de donde estabas" y no
+     * "cerca de ti".
+     */
+    val locationAgeMillis: Long? = null
 )
 
 /**
@@ -74,6 +86,11 @@ class NearbyActivitiesViewModel(application: Application) : AndroidViewModel(app
     )
 
     private val locationProvider = LocationProvider(application)
+
+    /**
+     * El historial de busquedas. Cada busqueda que el usuario hace queda registrada aqui.
+     */
+    private val searchHistoryDao = (application as App).database.searchHistoryDao()
 
     private val _state = MutableStateFlow(NearbyUiState())
     val state: StateFlow<NearbyUiState> = _state.asStateFlow()
@@ -117,15 +134,32 @@ class NearbyActivitiesViewModel(application: Application) : AndroidViewModel(app
 
                 is LocationResult.Available ->
                     loadAround(location.latitude, location.longitude, radiusKm)
+
+                is LocationResult.Stale ->
+                    // La posicion es de antes, pero se busca igual. Lo unico que cambia
+                    // es que se guarda su edad para que la pantalla lo diga. Bloquear la
+                    // busqueda aqui seria dejar al usuario sin nada cuando justamente
+                    // tenemos con que responderle.
+                    loadAround(
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        radiusKm = radiusKm,
+                        locationAgeMillis = location.ageMillis
+                    )
             }
         }
     }
 
-    private suspend fun loadAround(latitude: Double, longitude: Double, radiusKm: Double) {
+    private suspend fun loadAround(
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double,
+        locationAgeMillis: Long? = null
+    ) {
         // Sin conexion ni se intenta la peticion: se va directo a lo guardado. Intentarla
         // solo haria esperar al usuario hasta que se agote el tiempo de espera.
         if (!ApiClient.isOnline()) {
-            showLocalResults(latitude, longitude, radiusKm)
+            showLocalResults(latitude, longitude, radiusKm, locationAgeMillis)
             return
         }
 
@@ -141,13 +175,16 @@ class NearbyActivitiesViewModel(application: Application) : AndroidViewModel(app
                     hasSearched = true,
                     activities = activities,
                     fromLocalData = false,
-                    elapsedMillis = null
+                    elapsedMillis = null,
+                    locationAgeMillis = locationAgeMillis
                 )
             }
+
+            recordSearch(latitude, longitude, radiusKm, activities.size, wasOffline = false)
         } catch (e: Exception) {
             // El servidor no respondio. En vez de dejar al usuario con un error y la
             // pantalla vacia, se le muestra lo que el telefono ya tenia guardado.
-            showLocalResults(latitude, longitude, radiusKm)
+            showLocalResults(latitude, longitude, radiusKm, locationAgeMillis)
         }
     }
 
@@ -158,7 +195,12 @@ class NearbyActivitiesViewModel(application: Application) : AndroidViewModel(app
      * la base de datos local y las distancias se recalculan contra la posicion actual del
      * usuario, todo en un hilo secundario para que la pantalla no se congele.
      */
-    private suspend fun showLocalResults(latitude: Double, longitude: Double, radiusKm: Double) {
+    private suspend fun showLocalResults(
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double,
+        locationAgeMillis: Long? = null
+    ) {
         val result = activityRepository.nearbyFromLocalDatabase(latitude, longitude, radiusKm)
         _state.update {
             it.copy(
@@ -174,8 +216,50 @@ class NearbyActivitiesViewModel(application: Application) : AndroidViewModel(app
                     "Sin conexion y no hay actividades guardadas en este telefono."
                 } else {
                     null
-                }
+                },
+                locationAgeMillis = locationAgeMillis
             )
+        }
+
+        recordSearch(latitude, longitude, radiusKm, result.activities.size, wasOffline = true)
+    }
+
+    /**
+     * Deja constancia de la busqueda en la tabla `search_history`.
+     *
+     * Se guarda tambien cuando no hubo resultados: un cero tambien es informacion. Y se
+     * guarda el campo `wasOffline`, que es el que despues permite responder con datos, y
+     * no de memoria, cuantas veces la app le sirvio al usuario sin internet.
+     *
+     * Todo va dentro de un try porque el historial es un extra. Lo que no puede pasar es
+     * que un fallo al escribirlo deje al usuario sin ver sus actividades, y de hecho no
+     * puede: la busqueda ya se publico en el estado antes de llegar aqui.
+     */
+    private suspend fun recordSearch(
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double,
+        resultCount: Int,
+        wasOffline: Boolean
+    ) {
+        // Sin sesion no hay a quien atribuir la busqueda. Pasa con quien solo entra a
+        // mirar sin cuenta.
+        val userId = ApiClient.tokens.userId ?: return
+
+        try {
+            searchHistoryDao.recordSearch(
+                SearchHistoryEntity(
+                    userId = userId,
+                    latitude = latitude,
+                    longitude = longitude,
+                    radiusKm = radiusKm,
+                    resultCount = resultCount,
+                    wasOffline = wasOffline,
+                    searchedAt = System.currentTimeMillis()
+                )
+            )
+        } catch (error: Exception) {
+            Log.e("NearbyActivitiesViewModel", "No se pudo guardar la busqueda", error)
         }
     }
 

@@ -6,7 +6,9 @@ import androidx.room.Room
 import com.group41.kotlinapp.analytics.Analytics
 import com.group41.kotlinapp.data.local.AppDatabase
 import com.group41.kotlinapp.data.local.MIGRATION_1_2
+import com.group41.kotlinapp.data.local.MIGRATION_2_3
 import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.storage.FastKeyValueStore
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,15 +36,24 @@ class App : Application() {
             AppDatabase::class.java,
             "llamalla.db"
         )
-            // Sin esta linea Room no sabria como pasar de la version 1 a la 2 y cerraria
-            // la app al abrirla. Con ella, el usuario que ya tenia la app instalada
-            // conserva todo lo que habia descargado.
-            .addMigrations(MIGRATION_1_2)
+            // Sin estas lineas Room no sabria como pasar de una version a la siguiente y
+            // cerraria la app al abrirla. Con ellas, el usuario que ya tenia la app
+            // instalada conserva todo lo que habia descargado.
+            //
+            // Se pasan todas las migraciones, no solo la ultima: un telefono que tenga
+            // instalada la version 1 tiene que poder llegar a la 3 pasando por la 2, y
+            // Room encadena los saltos el solo si los tiene todos a mano.
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
 
     override fun onCreate() {
         super.onCreate()
+
+        // MMKV se prepara antes que nada porque otras partes del arranque ya leen de el.
+        // Es barato: solo mapea el archivo en memoria, no lo recorre.
+        FastKeyValueStore.initialize(this)
+
         ApiClient.init(this)
         applicationScope.launch {
             try {
@@ -57,8 +68,26 @@ class App : Application() {
                 Log.e("App", "Unable to initialize account preferences", error)
             }
         }
+        // El registro de sincronizaciones se poda al arrancar. Un intento fallido de hace
+        // tres meses no le sirve a nadie, y la tabla crece sola porque nada la vacia.
+        applicationScope.launch {
+            try {
+                val thirtyDaysAgo = System.currentTimeMillis() - THIRTY_DAYS_MILLIS
+                database.syncLogDao().deleteOlderThan(thirtyDaysAgo)
+            } catch (error: Exception) {
+                // Limpiar es mantenimiento, no una funcion de la app: si falla, se
+                // intentara en el siguiente arranque y nadie se queda sin servicio.
+                Log.e("App", "No se pudo podar el registro de sincronizacion", error)
+            }
+        }
+
         Analytics.init(this)
         // Con sesión guardada se usa el id de la última vez (paso 2 del contrato).
         ApiClient.tokens.userId?.let { Analytics.setUserId(it) }
+    }
+
+    private companion object {
+        /** Cuanto tiempo se conserva el registro de intentos de sincronizacion. */
+        const val THIRTY_DAYS_MILLIS = 30L * 24 * 60 * 60 * 1000
     }
 }

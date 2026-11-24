@@ -1,11 +1,16 @@
 package com.group41.kotlinapp.sync
 
 import android.content.Context
+import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.group41.kotlinapp.App
 import com.group41.kotlinapp.AppPreferences
 import com.group41.kotlinapp.data.local.dao.ActivityDao
+import com.group41.kotlinapp.data.local.dao.SyncLogDao
+import com.group41.kotlinapp.data.local.entity.SyncLogEntity
+import com.group41.kotlinapp.data.local.entity.SyncOutcome
+import com.group41.kotlinapp.storage.DataExporter
 import com.group41.kotlinapp.model.JoinPayload
 import com.group41.kotlinapp.model.PendingAction
 import com.group41.kotlinapp.model.PendingActionType
@@ -40,8 +45,21 @@ class SyncWorker(
         var shouldRetryLater = false
         var allActionsSucceeded = true
 
+        val syncLog = app.database.syncLogDao()
+
         for (action in pending) {
+            // Se limpia antes de cada intento para no atribuirle a esta accion el codigo
+            // HTTP de la anterior. El bucle es secuencial y este worker atiende un solo
+            // trabajo, asi que no hay dos intentos a la vez que puedan pisarse.
+            lastHttpCode = null
+
             val outcome = send(action, activities, queue)
+
+            // Queda constancia del intento antes de tocar la cola, porque en cuanto la
+            // accion sale bien su fila se borra y con ella desapareceria toda huella de
+            // que existio. El log es lo que permite responderle al usuario "si, tu
+            // inscripcion llego, a tal hora".
+            recordAttempt(app, syncLog, action, outcome)
             // A rejected or discarded action is still a failed synchronization, even
             // when removing it leaves the queue empty. Do not report that as success.
             if (outcome != Outcome.DONE) allActionsSucceeded = false
@@ -95,6 +113,11 @@ class SyncWorker(
             throw e
 
         } catch (e: HttpException) {
+            // El codigo se guarda aqui, donde se conoce, para que el registro pueda
+            // distinguir "el servidor dijo que no" de "no se pudo ni preguntar". Son dos
+            // cosas distintas: la primera se descarta, la segunda se reintenta.
+            lastHttpCode = e.code()
+
             when {
                 e.code() == 409 -> {
                     val remote = ActivityRepository(activities).getActivityById(payload.activityId, serverOnly = true)
@@ -168,6 +191,73 @@ class SyncWorker(
         RETRY_LATER,
         UNPROCESSABLE,
         KEEP_PENDING
+    }
+
+    /**
+     * El codigo HTTP del ultimo intento, si el servidor llego a contestar.
+     *
+     * Es una propiedad del worker y no un valor devuelto porque [Outcome] solo dice que
+     * hacer con la accion, y convertirlo en una clase con datos obligaria a tocar las dos
+     * ramas del envio. El bucle de [doWork] es secuencial y cada worker atiende un unico
+     * trabajo, asi que un solo campo basta: se limpia antes de cada intento y se lee justo
+     * despues.
+     */
+    private var lastHttpCode: Int? = null
+
+    /**
+     * Deja constancia del intento en la tabla `sync_log` y en el archivo de log.
+     *
+     * Se escribe en los dos sitios porque sirven a lectores distintos:
+     *
+     * - La tabla la consulta la app: ordena por fecha, agrupa por resultado y se cruza con
+     *   la cola. Es lo que alimenta la pantalla donde el usuario ve que esta pendiente.
+     * - El archivo lo lee una persona. Se puede exportar y mandar, que es lo que hace falta
+     *   cuando alguien reporta "mi inscripcion no llego" y hay que averiguar por que.
+     *
+     * Todo va dentro de un try: el registro es diagnostico, no una funcion de la app. Si
+     * fallara al escribirlo, lo que no puede pasar es que la sincronizacion se caiga con
+     * el, porque entonces la accion del usuario se quedaria sin mandar por no haber podido
+     * anotar que se mando.
+     */
+    private suspend fun recordAttempt(
+        app: App,
+        syncLog: SyncLogDao,
+        action: PendingAction,
+        outcome: Outcome
+    ) {
+        // KEEP_PENDING no se registra: no hubo intento contra el servidor, la accion
+        // simplemente se dejo quieta. Anotarlo llenaria el log de lineas sin informacion.
+        if (outcome == Outcome.KEEP_PENDING) return
+
+        val resultado = when (outcome) {
+            Outcome.DONE -> SyncOutcome.SUCCESS
+            Outcome.RETRY_LATER -> SyncOutcome.RETRY
+            // Un payload que no se puede leer es un rechazo definitivo igual que un 4xx:
+            // en los dos casos la accion se saca de la cola y no se vuelve a intentar.
+            Outcome.REJECTED, Outcome.UNPROCESSABLE -> SyncOutcome.REJECTED
+            Outcome.KEEP_PENDING -> return
+        }
+
+        try {
+            syncLog.insert(
+                SyncLogEntity(
+                    actionId = action.id,
+                    userId = action.userId,
+                    actionType = action.type.name,
+                    outcome = resultado,
+                    httpCode = lastHttpCode,
+                    attemptedAt = System.currentTimeMillis()
+                )
+            )
+
+            DataExporter.appendToSyncLog(
+                context = app,
+                line = "${action.type.name} ${action.id} -> $resultado" +
+                    (lastHttpCode?.let { " (HTTP $it)" } ?: "")
+            )
+        } catch (error: Exception) {
+            Log.e("SyncWorker", "No se pudo registrar el intento de sincronizacion", error)
+        }
     }
 
     companion object {
