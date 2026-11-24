@@ -65,6 +65,20 @@ class ProfileViewModel(
     fun hasSession() = auth.hasSession()
 
     /**
+     * Pone el perfil guardado en el telefono mientras llega el del servidor.
+     *
+     * Esto es lo que hace que el perfil se vea sin internet. Sin esto, abrir la pantalla
+     * sin red la dejaba en blanco: `loadUser` fallaba y el estado se quedaba con `user`
+     * en null.
+     *
+     * Solo escribe si todavia no hay usuario, para no pisar con una copia vieja uno que
+     * ya haya llegado del servidor, ni los cambios que el usuario acabe de guardar.
+     */
+    fun seedUser(cached: UserDto) {
+        if (_state.value.user == null) _state.update { it.copy(user = cached) }
+    }
+
+    /**
      * Pide el usuario al backend. Sin `force` no repite si ya lo tiene o lo
      * está pidiendo: al rotar la pantalla no se vuelve a llamar a /me.
      */

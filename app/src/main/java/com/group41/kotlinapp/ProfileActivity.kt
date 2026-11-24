@@ -33,6 +33,7 @@ import com.group41.kotlinapp.viewmodel.ProfileViewModel
 import com.group41.kotlinapp.viewmodel.ScheduleEvent
 import com.group41.kotlinapp.viewmodel.ScheduleUiState
 import com.group41.kotlinapp.viewmodel.ScheduleViewModel
+import com.group41.kotlinapp.storage.ProfileCache
 import kotlinx.coroutines.launch
 import android.content.Intent
 
@@ -127,8 +128,22 @@ class ProfileActivity : AppCompatActivity() {
         logoutButton = findViewById(R.id.btn_logout)
         logoutButton.setOnClickListener { viewModel.logout() }
 
+        findViewById<View>(R.id.btn_pending).setOnClickListener {
+            startActivity(Intent(this, PendingActionsActivity::class.java))
+        }
+
+        findViewById<View>(R.id.btn_settings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
         googleCard = findViewById(R.id.card_google_calendar)
         googleCard.setOnClickListener { onGoogleCardClicked() }
+
+        // Antes de pedirle nada al servidor se pone el perfil que quedo guardado en el
+        // telefono. Es lo que permite que esta pantalla sirva sin internet: se ve el
+        // nombre y la descripcion de inmediato, y si hay red el servidor los actualiza
+        // un instante despues.
+        ProfileCache.load(this)?.let { viewModel.seedUser(it) }
 
         // Primer dibujo: quita el mockup, o muestra el usuario si ya estaba (tras rotar)
         shownUser = viewModel.state.value.user
@@ -167,6 +182,9 @@ class ProfileActivity : AppCompatActivity() {
     private fun render(state: ProfileUiState) {
         when {
             state.loggedOut -> {
+                // La copia local se borra al cerrar sesion. Si no, el siguiente usuario
+                // que entrara en este telefono veria por un instante el nombre del anterior.
+                ProfileCache.clear(this)
                 openLogin()
                 return
             }
@@ -181,6 +199,10 @@ class ProfileActivity : AppCompatActivity() {
         if (state.user != shownUser) {
             shownUser = state.user
             showUser(state.user)
+
+            // Cada perfil nuevo que se dibuja se guarda, para que la proxima vez haya algo
+            // que mostrar aunque no haya red.
+            state.user?.let { ProfileCache.save(this, it) }
         }
     }
 
