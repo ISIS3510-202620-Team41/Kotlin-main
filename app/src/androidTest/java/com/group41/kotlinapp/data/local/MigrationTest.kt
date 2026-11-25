@@ -63,7 +63,7 @@ class MigrationTest {
     }
 
     @Test
-    fun migrarDeLaVersion1ALa4ConservaLasActividadesGuardadas() {
+    fun migrarDeLaVersion1ALa5ConservaLasActividadesGuardadas() {
         // --- 1. Se fabrica a mano una base como la que tendria un usuario con la app vieja.
         crearBaseVersion1 { db ->
             db.execSQL(
@@ -75,7 +75,7 @@ class MigrationTest {
 
         // 2. Open the database with Room and run the registered migrations.
         val database = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
         try {
@@ -97,7 +97,7 @@ class MigrationTest {
     }
 
     @Test
-    fun migrarDeLaVersion2ALa3CreaLasTablasNuevasSinTocarLasViejas() {
+    fun migrarDeLaVersion2ALa5CreaLasTablasNuevasSinTocarLasViejas() {
         // --- 1. Una base en version 2: ya tiene `pendingSync`, pero no las tablas nuevas.
         // Se guarda una inscripcion pendiente a proposito, porque es el dato que mas
         // dolerian perder: es una accion del usuario que el servidor todavia no conoce.
@@ -114,7 +114,7 @@ class MigrationTest {
         }
 
         val database = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
         try {
