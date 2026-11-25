@@ -50,9 +50,9 @@ class TokenStore(context: Context) {
 
     /** id del usuario en el backend; analytics lo necesita desde el arranque. */
     var userId: String?
-        get() = prefs.getString("user_id", null)
+        get() = prefs.getString(USER_ID, null)
         set(value) = synchronized(lock) {
-            prefs.edit { putString("user_id", value) }
+            prefs.edit { putString(USER_ID, value) }
             sessionChanges.update { it + 1 }
         }
 
@@ -97,7 +97,7 @@ class TokenStore(context: Context) {
                     .putString(REFRESH, refreshValue).commit()) {
                 throw IOException("Unable to persist authentication tokens")
             }
-            if (!prefs.edit().putString("user_id", response.user.id).commit()) {
+            if (!prefs.edit().putString(USER_ID, response.user.id).commit()) {
                 throw IOException("Unable to persist session owner")
             }
             sessionChanges.update { it + 1 }
@@ -149,5 +149,6 @@ class TokenStore(context: Context) {
         val sessionChanges = MutableStateFlow(0L)
         const val ACCESS = "access_token"
         const val REFRESH = "refresh_token"
+        const val USER_ID = "user_id"
     }
 }

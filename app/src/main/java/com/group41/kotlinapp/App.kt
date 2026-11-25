@@ -11,6 +11,7 @@ import com.group41.kotlinapp.data.local.MIGRATION_1_2
 import com.group41.kotlinapp.data.local.MIGRATION_2_3
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.storage.FastKeyValueStore
+import com.group41.kotlinapp.storage.AgendaPreferencesStore
 import com.group41.kotlinapp.data.local.MIGRATION_3_4
 import com.group41.kotlinapp.data.local.MIGRATION_4_5
 import com.group41.kotlinapp.sync.SyncScheduler
@@ -23,6 +24,9 @@ import kotlinx.coroutines.launch
 
 /** Owns shared services and startup work that outlive individual activities. */
 class App : Application() {
+
+    /** Shares one agenda preference store across activity and ViewModel recreation. */
+    internal val agendaPreferences by lazy { AgendaPreferencesStore(this) }
 
     /** Shares the thumbnail cache between prefetching and My Activities. */
     internal val activityThumbnailLoader by lazy { createActivityThumbnailLoader(this) }

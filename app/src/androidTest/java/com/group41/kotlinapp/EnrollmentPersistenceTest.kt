@@ -5,11 +5,17 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.group41.kotlinapp.data.local.entity.PendingActionEntity
 import com.group41.kotlinapp.data.local.entity.UserPreferenceEntity
+import com.group41.kotlinapp.data.local.entity.UserEnrollmentEntity
+import com.google.gson.JsonArray
+import com.google.gson.JsonNull
 import com.google.gson.JsonObject
+import com.google.gson.JsonPrimitive
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.model.JoinPayload
 import com.group41.kotlinapp.model.PendingActionType
 import com.group41.kotlinapp.network.ApiService
+import com.group41.kotlinapp.network.EnrollmentAccount
+import com.group41.kotlinapp.repository.ActivityRepository
 import com.group41.kotlinapp.repository.JoinResult
 import com.group41.kotlinapp.repository.PendingActionRepository
 import retrofit2.HttpException
@@ -232,4 +238,106 @@ class EnrollmentPersistenceTest {
             context.deleteDatabase(name)
         }
     }
+
+    @Test
+    fun activityReadsPreserveHistoryWhenMembershipIsUnknown() = runBlocking {
+        val confirmed = UserEnrollmentEntity("user", "active", joined = true, enrolledAt = 10L)
+        val canceled = UserEnrollmentEntity("user", "history", joined = false, enrolledAt = 20L, canceledAt = 30L)
+        val activePayload = activityResponse(confirmed.activityId)
+        val canceledPayload = activityResponse(canceled.activityId)
+        val negative = activityResponse("never-joined").apply { addProperty("joined", false) }
+
+        try {
+            withDatabase { db ->
+                db.userEnrollmentDao().upsert(confirmed)
+                db.userEnrollmentDao().upsert(canceled)
+            }
+            withDatabase { db ->
+                val api = membershipApi(listOf(activePayload, canceledPayload, negative)) { _, _ -> }
+                val repository = membershipRepository(db, api) { "user" }
+                repository.getRecommendedActivities(1.0, 1.0)
+                for (unknown in listOf(JsonNull.INSTANCE, JsonPrimitive("false"), JsonPrimitive(0))) {
+                    activePayload.add("joined", unknown)
+                    canceledPayload.add("joined", unknown)
+                    repository.getNearbyActivities(1.0, 1.0)
+                    repository.getActivityById(confirmed.activityId)
+                    repository.getActivityById(canceled.activityId)
+                    assertEquals(
+                        setOf(confirmed, canceled),
+                        db.userEnrollmentDao().getForUser("user").toSet()
+                    )
+                }
+                activePayload.addProperty("joined", false)
+                repository.getActivityById(confirmed.activityId)
+                val updated = checkNotNull(db.userEnrollmentDao().get("user", confirmed.activityId))
+                assertFalse(updated.joined)
+                assertFalse(updated.confirmedJoined)
+                assertEquals(confirmed.enrolledAt, updated.enrolledAt)
+                assertNotNull(updated.canceledAt)
+                assertEquals(canceled, db.userEnrollmentDao().get("user", canceled.activityId))
+            }
+        } finally {
+            context.deleteDatabase(name)
+        }
+    }
+
+    @Test
+    fun activityReadsBindTheRequestAccountAndDropMembershipAfterSwitchingAccounts() = runBlocking {
+        val first = UserEnrollmentEntity("first", "shared", joined = true, enrolledAt = 10L)
+        val second = first.copy(userId = "second", enrolledAt = 20L)
+        var currentUser = first.userId
+        val requestedMethods = mutableListOf<String>()
+        val negative = activityResponse(first.activityId).apply { addProperty("joined", false) }
+        val api = membershipApi(listOf(negative)) { method, transmittedAccount ->
+            assertEquals(EnrollmentAccount(first.userId), transmittedAccount)
+            requestedMethods.add(method)
+            // Switch accounts after request dispatch and before the response can reconcile Room.
+            currentUser = second.userId
+        }
+        try {
+            withDatabase { db ->
+                db.userEnrollmentDao().upsert(first)
+                db.userEnrollmentDao().upsert(second)
+                val repository = membershipRepository(db, api) { currentUser }
+                repository.getRecommendedActivities(1.0, 1.0)
+                currentUser = first.userId
+                repository.getNearbyActivities(1.0, 1.0)
+                currentUser = first.userId
+                repository.getActivityById(first.activityId)
+
+                assertEquals(listOf("recommendations", "nearbyActivities", "getActivity"), requestedMethods)
+                assertEquals(first, db.userEnrollmentDao().get(first.userId, first.activityId))
+                assertEquals(second, db.userEnrollmentDao().get(second.userId, second.activityId))
+            }
+        } finally {
+            context.deleteDatabase(name)
+        }
+    }
+
+    private fun membershipRepository(db: AppDatabase, api: ApiService, userId: () -> String?) =
+        ActivityRepository(db.activityDao(), PendingActionRepository(db) { api }, { api }, { true }, userId)
+
+    private fun activityResponse(id: String) = JsonObject().apply {
+        addProperty("id", id)
+        addProperty("title", id)
+        addProperty("category", "DEPORTES")
+    }
+
+    private fun membershipApi(
+        activities: List<JsonObject>,
+        onRequest: (String, Any?) -> Unit
+    ): ApiService = Proxy.newProxyInstance(
+        ApiService::class.java.classLoader, arrayOf(ApiService::class.java)
+    ) { _, method, args ->
+        // The last JVM argument is the continuation for the Retrofit suspend method.
+        onRequest(method.name, args[args.lastIndex - 1])
+        when (method.name) {
+            "getActivity" -> Response.success(activities.single { it.get("id").asString == args[0] })
+            "nearbyActivities" -> Response.success(JsonArray().apply { activities.forEach { add(it) } })
+            "recommendations" -> Response.success(JsonArray().apply {
+                activities.forEach { activity -> add(JsonObject().apply { add("activity", activity) }) }
+            })
+            else -> error("Unexpected request: ${method.name}")
+        }
+    } as ApiService
 }

@@ -24,16 +24,20 @@ import kotlinx.coroutines.withContext
  * ViewModel responsible for fetching, filtering, and joining recommended activities.
  * Extends AndroidViewModel to access the Application context and obtain Room database DAOs.
  */
-class RecommendationsViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val activityRepository = ActivityRepository(
-        activityDao = (application as App).database.activityDao(),
-        // El buzon de acciones pendientes: sin el, tocar "Unirme" sin internet fallaria
-        // con un error en vez de guardarse para enviarlo despues.
-        pendingActions = PendingActionRepository(application.database)
-    )
-    private val preferencesRepository = PreferencesRepository(
-        preferencesDao = (application as App).database.preferencesDao()
+class RecommendationsViewModel internal constructor(
+    application: Application,
+    private val activityRepository: ActivityRepository,
+    private val preferencesRepository: PreferencesRepository
+) : AndroidViewModel(application) {
+    constructor(application: Application) : this(
+        application,
+        ActivityRepository(
+            activityDao = (application as App).database.activityDao(),
+            // El buzon de acciones pendientes: sin el, tocar "Unirme" sin internet fallaria
+            // con un error en vez de guardarse para enviarlo despues.
+            pendingActions = PendingActionRepository(application.database)
+        ),
+        PreferencesRepository(application.database.preferencesDao())
     )
 
     private val _isOffline = MutableStateFlow(false)
