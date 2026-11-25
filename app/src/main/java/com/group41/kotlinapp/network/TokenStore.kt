@@ -1,10 +1,15 @@
 package com.group41.kotlinapp.network
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import androidx.core.content.edit
 import java.io.IOException
 import java.security.GeneralSecurityException
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class TokenStore(context: Context) {
     private val prefs = context.getSharedPreferences("auth", Context.MODE_PRIVATE)
@@ -44,8 +49,18 @@ class TokenStore(context: Context) {
 
     /** id del usuario en el backend; analytics lo necesita desde el arranque. */
     var userId: String?
-        get() = prefs.getString("user_id", null)
-        set(value) = prefs.edit { putString("user_id", value) }
+        get() = prefs.getString(USER_ID, null)
+        set(value) = prefs.edit { putString(USER_ID, value) }
+
+    /** Observes the saved account ID across TokenStore instances, including sign-out. */
+    internal fun observeUserId(): Flow<String?> = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == USER_ID || key == null) trySend(userId)
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trySend(userId)
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }.distinctUntilChanged()
 
     /** El servidor guarda el token de Google; aquí solo la bandera para la UI */
     var googleConnected: Boolean
@@ -83,7 +98,7 @@ class TokenStore(context: Context) {
                     .putString(REFRESH, refreshValue).commit()) {
                 throw IOException("Unable to persist authentication tokens")
             }
-            if (!prefs.edit().putString("user_id", response.user.id).commit()) {
+            if (!prefs.edit().putString(USER_ID, response.user.id).commit()) {
                 throw IOException("Unable to persist session owner")
             }
         }
@@ -92,7 +107,10 @@ class TokenStore(context: Context) {
     fun clear() {
         synchronized(lock) {
             // Remove legacy data first so an interrupted logout cannot migrate it back.
-            if (!prefs.edit().clear().commit()) throw IOException("Unable to clear session metadata")
+            // Remove keys explicitly so Android versions below 30 also notify account observers.
+            val editor = prefs.edit()
+            prefs.all.keys.forEach { editor.remove(it) }
+            if (!editor.commit()) throw IOException("Unable to clear session metadata")
             if (!encryptedPrefs.edit().clear().commit()) throw IOException("Unable to clear authentication tokens")
         }
     }
@@ -131,5 +149,6 @@ class TokenStore(context: Context) {
         val lock = Any()
         const val ACCESS = "access_token"
         const val REFRESH = "refresh_token"
+        const val USER_ID = "user_id"
     }
 }

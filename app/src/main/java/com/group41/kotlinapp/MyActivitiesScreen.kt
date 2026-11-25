@@ -80,6 +80,7 @@ private sealed interface MyActivitiesState {
  *
  * @param cancelEnrollment Submits a cancellation through ActivityRepository.
  * @param loadActivity Fetches missing activity details so the repository can cache them in Room.
+ * @param onOpenAgenda Navigates to the signed-in user's calendar.
  */
 @Composable
 internal fun MyActivitiesScreen(
@@ -88,7 +89,8 @@ internal fun MyActivitiesScreen(
     isOnline: Boolean,
     onOpenActivity: (Activity) -> Unit,
     cancelEnrollment: suspend (String) -> Unit,
-    loadActivity: suspend (String) -> Unit
+    loadActivity: suspend (String) -> Unit,
+    onOpenAgenda: (() -> Unit)? = null
 ) {
     var loadAttempt by remember(userId) { mutableIntStateOf(0) }
     // Retrying starts a fresh Room observation after a read failure.
@@ -138,6 +140,17 @@ internal fun MyActivitiesScreen(
                 color = colorResource(R.color.text_dark),
                 style = MaterialTheme.typography.bodyMedium
             )
+        }
+        if (!userId.isNullOrBlank() && onOpenAgenda != null) {
+            Button(
+                onClick = onOpenAgenda,
+                modifier = Modifier.align(Alignment.End).padding(end = 20.dp, top = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = LlamallaBlue,
+                    contentColor = colorResource(R.color.text_dark)
+                )
+            ) { Text("Ver agenda") }
         }
         when (state) {
             MyActivitiesState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -320,7 +333,11 @@ private fun EnrollmentCard(
                     TextButton(onClick = { detailsAttempt++ }) { Text("Reintentar detalles") }
                 }
             }
-            EnrollmentStatus(enrollment)
+            EnrollmentStatusBadge(
+                joinPending = enrollment.joinPending,
+                cancellationPending = enrollment.cancellationPending,
+                isCanceled = enrollment.isCanceled
+            )
             if (enrollment.isCanceled && cancellationDate != null) {
                 Text("Cancelada el $cancellationDate", style = MaterialTheme.typography.bodyMedium, color = muted)
             }
@@ -358,15 +375,20 @@ private fun EnrollmentCard(
     }
 }
 
+/** Renders the same enrollment labels and indicators on the activity list and agenda. */
 @Composable
-private fun EnrollmentStatus(enrollment: EnrolledActivity) {
+internal fun EnrollmentStatusBadge(
+    joinPending: Boolean,
+    cancellationPending: Boolean,
+    isCanceled: Boolean = false
+) {
     val (label, accent) = when {
-        enrollment.isCanceled -> "Inscripción cancelada" to colorResource(R.color.text_muted)
-        enrollment.cancellationPending -> "Cancelación pendiente" to LlamallaRose
-        enrollment.joinPending -> "Inscripción pendiente" to colorResource(R.color.text_muted)
+        isCanceled -> "Inscripción cancelada" to colorResource(R.color.text_muted)
+        cancellationPending -> "Cancelación pendiente" to LlamallaRose
+        joinPending -> "Inscripción pendiente" to colorResource(R.color.text_muted)
         else -> "Inscripción confirmada" to colorResource(R.color.text_dark)
     }
-    val background = if (enrollment.cancellationPending) LlamallaRose.copy(alpha = 0.08f)
+    val background = if (cancellationPending) LlamallaRose.copy(alpha = 0.08f)
         else colorResource(R.color.blue_soft)
     Row(
         modifier = Modifier.background(background, RoundedCornerShape(20.dp))
@@ -374,7 +396,7 @@ private fun EnrollmentStatus(enrollment: EnrolledActivity) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val dotColor = if (enrollment.isCanceled || enrollment.cancellationPending || enrollment.joinPending) accent else LlamallaBlue
+        val dotColor = if (isCanceled || cancellationPending || joinPending) accent else LlamallaBlue
         Box(Modifier.size(7.dp).background(dotColor, CircleShape))
         Text(label, color = accent, style = MaterialTheme.typography.labelLarge)
     }

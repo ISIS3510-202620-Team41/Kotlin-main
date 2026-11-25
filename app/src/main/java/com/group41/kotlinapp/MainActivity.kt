@@ -78,15 +78,20 @@ import com.group41.kotlinapp.ui.theme.LlamallaBlack
 import com.group41.kotlinapp.ui.theme.LlamallaBlue
 import com.group41.kotlinapp.ui.theme.LlamallaRose
 import com.group41.kotlinapp.ui.theme.LlamallaWhite
+import com.group41.kotlinapp.viewmodel.AgendaViewModel
 import com.group41.kotlinapp.viewmodel.RecommendationsViewModel
 
 class MainActivity : ComponentActivity() {
 
     private var selectedTab by mutableIntStateOf(R.id.nav_home)
+    private var agendaOpen by mutableStateOf(false)
+    private val agendaViewModel by lazy { ViewModelProvider(this)[AgendaViewModel::class.java] }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         selectedTab = savedInstanceState?.getInt(TAB_KEY) ?: intent.requestedTab()
+        agendaOpen = selectedTab == R.id.nav_activities &&
+            savedInstanceState?.getBoolean(AGENDA_KEY) == true
 
         val recommendationsViewModel =
             ViewModelProvider(this)[RecommendationsViewModel::class.java]
@@ -95,7 +100,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             KotlinAppTheme {
-                BackHandler(enabled = selectedTab == R.id.nav_activities) { selectedTab = R.id.nav_home }
+                BackHandler(enabled = selectedTab == R.id.nav_activities) {
+                    if (agendaOpen) agendaOpen = false else selectedTab = R.id.nav_home
+                }
                 Column(
                     Modifier.fillMaxSize()
                         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
@@ -107,7 +114,7 @@ class MainActivity : ComponentActivity() {
                             RecommendationScreen(viewModel = recommendationsViewModel)
                         }
                     }
-                    Box(Modifier.fillMaxWidth().background(LlamallaWhite).navigationBarsPadding()) {
+                    if (!agendaOpen) Box(Modifier.fillMaxWidth().background(LlamallaWhite).navigationBarsPadding()) {
                         AndroidView(
                             modifier = Modifier.fillMaxWidth(),
                             factory = { context ->
@@ -138,8 +145,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Hosts both Activities destinations so they share the same connectivity observation. */
     @Composable
     private fun ActivitiesTab() {
+        val connectivity = remember { ConnectivityObserver(applicationContext) }
+        val isOnline by connectivity.isOnline.collectAsStateWithLifecycle(connectivity.currentlyOnline())
+        if (agendaOpen) {
+            val activities by agendaViewModel.activities.collectAsStateWithLifecycle()
+            PersonalAgendaScreen(
+                activities = activities,
+                isOnline = isOnline,
+                onBack = { agendaOpen = false }
+            )
+            return
+        }
         val database = (application as App).database
         val repository = remember(database) {
             ActivityRepository(
@@ -147,26 +166,26 @@ class MainActivity : ComponentActivity() {
                 pendingActions = PendingActionRepository(database)
             )
         }
-        val connectivity = remember { ConnectivityObserver(applicationContext) }
-        // Connectivity updates the offline message and lets the screen retry missing details.
-        val isOnline by connectivity.isOnline.collectAsStateWithLifecycle(connectivity.currentlyOnline())
         MyActivitiesScreen(
             userId = ApiClient.tokens.userId,
             enrollmentDao = database.userEnrollmentDao(),
             isOnline = isOnline,
             onOpenActivity = { startActivity(ActivityDetailActivity.createIntent(this, it)) },
             cancelEnrollment = { repository.cancelEnrollment(it) },
-            loadActivity = { repository.getActivityById(it) }
+            loadActivity = { repository.getActivityById(it) },
+            onOpenAgenda = { agendaOpen = true }
         )
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        agendaOpen = false
         selectedTab = intent.requestedTab()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt(TAB_KEY, selectedTab)
+        outState.putBoolean(AGENDA_KEY, agendaOpen)
         super.onSaveInstanceState(outState)
     }
 
@@ -175,6 +194,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAB_KEY = "main_tab"
+        private const val AGENDA_KEY = "personal_agenda_open"
 
         /** Returns from Profile to the requested tab in the existing MainActivity. */
         internal fun tabIntent(context: Context, tab: Int): Intent =
