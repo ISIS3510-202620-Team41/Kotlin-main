@@ -3,6 +3,7 @@ package com.group41.kotlinapp
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -43,10 +44,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.group41.kotlinapp.repository.ActivityChanges
 import com.group41.kotlinapp.connectivity.ConnectivityObserver
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -80,6 +86,7 @@ import com.group41.kotlinapp.ui.theme.LlamallaRose
 import com.group41.kotlinapp.ui.theme.LlamallaWhite
 import com.group41.kotlinapp.viewmodel.RecommendationsViewModel
 
+/** Hosts the main tabs and prepares enrollment thumbnails while the activity is visible. */
 class MainActivity : ComponentActivity() {
 
     private var selectedTab by mutableIntStateOf(R.id.nav_home)
@@ -87,6 +94,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         selectedTab = savedInstanceState?.getInt(TAB_KEY) ?: intent.requestedTab()
+        observeActivityThumbnails()
 
         val recommendationsViewModel =
             ViewModelProvider(this)[RecommendationsViewModel::class.java]
@@ -133,6 +141,43 @@ class MainActivity : ComponentActivity() {
                             update = { it.menu.findItem(selectedTab).isChecked = true }
                         )
                     }
+                }
+            }
+        }
+    }
+
+    /**
+     * Prefetches the signed-in user's Room thumbnails whenever their URLs change or
+     * connectivity returns. The observer runs independently of the selected tab.
+     */
+    private fun observeActivityThumbnails() {
+        val app = application as App
+        val connectivity = ConnectivityObserver(app)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Cancel the old Room observer and its downloads when the account changes.
+                ApiClient.tokens.userIds.collectLatest { userId ->
+                    if (userId.isNullOrBlank()) return@collectLatest
+
+                    app.database.userEnrollmentDao().observeEnrolledActivities(userId)
+                        .combine(connectivity.isOnline) { enrollments, online ->
+                            if (online) {
+                                enrollments.mapNotNull { enrollment ->
+                                    enrollment.activity?.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
+                                }.toSet()
+                            } else {
+                                emptySet()
+                            }
+                        }
+                        // Status updates and row reordering can leave the image URLs unchanged.
+                        .distinctUntilChanged()
+                        .catch { Log.w("MainActivity", "Could not observe enrollment thumbnails") }
+                        .collectLatest { urls ->
+                            // Going offline emits an empty set and cancels the in-flight batch.
+                            if (urls.isNotEmpty()) {
+                                app.activityThumbnailPrefetcher.prefetchThumbnails(urls.toList())
+                            }
+                        }
                 }
             }
         }
