@@ -31,7 +31,7 @@ internal class AgendaViewModel internal constructor(
     constructor(application: Application) : this(
         application,
         (application as App).database.userEnrollmentDao(),
-        ApiClient.tokens.observeUserId()
+        ApiClient.tokens.userIds
     )
 
     private val _activities = MutableStateFlow<List<AgendaActivity>>(emptyList())
