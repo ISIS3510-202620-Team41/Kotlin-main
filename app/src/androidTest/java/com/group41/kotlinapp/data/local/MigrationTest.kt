@@ -29,6 +29,8 @@ import org.junit.runner.RunWith
  * Lo que simula es exactamente lo que le pasa a alguien que ya tenia la app instalada: su
  * telefono tiene la base en una version vieja y al actualizar se encuentra con un codigo
  * que espera la version 3.
+ * Opens a version 1 database that lacks pendingSync and verifies that the
+ * current app can migrate it to version 4 without losing cached activities.
  *
  * Si la migracion estuviera mal, el sintoma seria el peor posible: la app se cerraria
  * nada mas abrirse, en los telefonos de quienes ya la usaban, y no en el del desarrollador
@@ -61,7 +63,7 @@ class MigrationTest {
     }
 
     @Test
-    fun migrarDeLaVersion1ALa3ConservaLasActividadesGuardadas() {
+    fun migrarDeLaVersion1ALa4ConservaLasActividadesGuardadas() {
         // --- 1. Se fabrica a mano una base como la que tendria un usuario con la app vieja.
         crearBaseVersion1 { db ->
             db.execSQL(
@@ -71,14 +73,9 @@ class MigrationTest {
             )
         }
 
-        // --- 2. Se abre con el codigo actual, que espera la version 3.
-        // Si alguna de las dos migraciones no sirviera, esta linea lanzaria la excepcion de
-        // Room y el test fallaria aqui mismo.
-        //
-        // Se pasan las dos porque Room no inventa el camino: para llegar de la 1 a la 3
-        // necesita tener a mano 1 -> 2 y 2 -> 3, y las aplica en orden.
+        // 2. Open the database with Room and run the registered migrations.
         val database = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
 
         try {

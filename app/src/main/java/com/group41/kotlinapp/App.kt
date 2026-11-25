@@ -9,6 +9,9 @@ import com.group41.kotlinapp.data.local.MIGRATION_1_2
 import com.group41.kotlinapp.data.local.MIGRATION_2_3
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.storage.FastKeyValueStore
+import com.group41.kotlinapp.data.local.MIGRATION_3_4
+import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.sync.SyncScheduler
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,14 +39,10 @@ class App : Application() {
             AppDatabase::class.java,
             "llamalla.db"
         )
-            // Sin estas lineas Room no sabria como pasar de una version a la siguiente y
-            // cerraria la app al abrirla. Con ellas, el usuario que ya tenia la app
-            // instalada conserva todo lo que habia descargado.
-            //
-            // Se pasan todas las migraciones, no solo la ultima: un telefono que tenga
-            // instalada la version 1 tiene que poder llegar a la 3 pasando por la 2, y
-            // Room encadena los saltos el solo si los tiene todos a mano.
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            // Sin esta linea Room no sabria como pasar de la version 1 a la 2 y cerraria
+            // la app al abrirla. Con ella, el usuario que ya tenia la app instalada
+            // conserva todo lo que habia descargado.
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
     }
 
@@ -62,6 +61,12 @@ class App : Application() {
                 // DataStore makes other readers/writers wait for that same migration,
                 // so a worker cannot record its timestamp before the UUID is available.
                 AppPreferences(this@App).userId.first()
+                // Resume queued actions if the app closed before they could sync.
+                ApiClient.tokens.userId?.let { userId ->
+                    if (database.pendingActionDao().getPendingActions(userId).isNotEmpty()) {
+                        SyncScheduler.schedule(this@App)
+                    }
+                }
             } catch (error: IOException) {
                 // Leave the original session intact if storage is temporarily unavailable.
                 // DataStore will attempt migration again on the next access.

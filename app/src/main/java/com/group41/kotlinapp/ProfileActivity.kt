@@ -35,7 +35,6 @@ import com.group41.kotlinapp.viewmodel.ScheduleUiState
 import com.group41.kotlinapp.viewmodel.ScheduleViewModel
 import com.group41.kotlinapp.storage.ProfileCache
 import kotlinx.coroutines.launch
-import android.content.Intent
 
 class ProfileActivity : AppCompatActivity() {
 
@@ -108,9 +107,10 @@ class ProfileActivity : AppCompatActivity() {
         bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
 
-                R.id.nav_home -> {
-                    startActivity(Intent(this, MainActivity::class.java))
-                    true
+                R.id.nav_home, R.id.nav_activities -> {
+                    startActivity(MainActivity.tabIntent(this, item.itemId))
+                    finish()
+                    false
                 }
 
                 R.id.nav_profile -> true

@@ -16,10 +16,6 @@ import com.group41.kotlinapp.model.PendingAction
 import com.group41.kotlinapp.model.PendingActionType
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.repository.PendingActionRepository
-import com.group41.kotlinapp.repository.ActivityRepository
-import com.group41.kotlinapp.repository.ActivityChanges
-import com.group41.kotlinapp.cache.ActivityMemoryCache
-import com.group41.kotlinapp.data.local.toActivity
 import kotlinx.coroutines.CancellationException
 import retrofit2.HttpException
 import java.io.IOException
@@ -37,8 +33,7 @@ class SyncWorker(
 
         val userId = ApiClient.tokens.userId ?: return Result.success()
 
-        val queue = PendingActionRepository(app.database.pendingActionDao())
-        val activities = app.database.activityDao()
+        val queue = PendingActionRepository(app.database)
         val pending = queue.pendingFor(userId)
         if (pending.isEmpty()) return Result.success()
 
@@ -48,18 +43,25 @@ class SyncWorker(
         val syncLog = app.database.syncLogDao()
 
         for (action in pending) {
-            // Se limpia antes de cada intento para no atribuirle a esta accion el codigo
-            // HTTP de la anterior. El bucle es secuencial y este worker atiende un solo
-            // trabajo, asi que no hay dos intentos a la vez que puedan pisarse.
-            lastHttpCode = null
-
-            val outcome = send(action, activities, queue)
-
-            // Queda constancia del intento antes de tocar la cola, porque en cuanto la
-            // accion sale bien su fila se borra y con ella desapareceria toda huella de
-            // que existio. El log es lo que permite responderle al usuario "si, tu
-            // inscripcion llego, a tal hora".
-            recordAttempt(app, syncLog, action, outcome)
+            // If the account changes mid-run, leave the remaining actions queued
+            // until their owner signs in again.
+            if (ApiClient.tokens.userId != userId) return Result.success()
+            if (action.type == PendingActionType.JOIN_ACTIVITY || action.type == PendingActionType.CANCEL_ENROLLMENT) {
+                // The repository confirms or restores the enrollment when it removes
+                // the action. WorkManager retries temporary failures.
+                try {
+                    if (!queue.syncEnrollment(action) { ApiClient.tokens.userId == userId }) {
+                        allActionsSucceeded = false
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    allActionsSucceeded = false
+                    shouldRetryLater = true
+                }
+                continue
+            }
+            val outcome = sendCreate(action, queue)
             // A rejected or discarded action is still a failed synchronization, even
             // when removing it leaves the queue empty. Do not report that as success.
             if (outcome != Outcome.DONE) allActionsSucceeded = false
@@ -87,67 +89,6 @@ class SyncWorker(
     }
 
     /**
-     * Intenta ejecutar una acción contra el backend y dice cómo le fue.
-     */
-    private suspend fun send(action: PendingAction, activities: ActivityDao, queue: PendingActionRepository): Outcome =
-        when (action.type) {
-            PendingActionType.JOIN_ACTIVITY -> sendJoin(action, activities)
-            PendingActionType.CREATE_ACTIVITY, PendingActionType.UPLOAD_ACTIVITY_PHOTO -> sendCreate(action, queue)
-        }
-
-    private suspend fun sendJoin(action: PendingAction, activities: ActivityDao): Outcome {
-        val payload = JoinPayload.fromJson(action.payload) ?: return Outcome.UNPROCESSABLE
-
-        return try {
-            ApiClient.api.join(
-                activityId = payload.activityId,
-                recommendationId = payload.recommendationId,
-                freeTimeMinutes = payload.freeTimeMinutes
-            )
-
-            confirmJoin(payload.activityId, activities)
-            Outcome.DONE
-
-        } catch (e: CancellationException) {
-            // Permite la cancelación limpia de la corrutina por parte de WorkManager
-            throw e
-
-        } catch (e: HttpException) {
-            // El codigo se guarda aqui, donde se conoce, para que el registro pueda
-            // distinguir "el servidor dijo que no" de "no se pudo ni preguntar". Son dos
-            // cosas distintas: la primera se descarta, la segunda se reintenta.
-            lastHttpCode = e.code()
-
-            when {
-                e.code() == 409 -> {
-                    val remote = ActivityRepository(activities).getActivityById(payload.activityId, serverOnly = true)
-                    if (remote?.joined == true && !remote.pendingSync) {
-                        confirmJoin(payload.activityId, activities)
-                        Outcome.DONE
-                    } else if (remote == null) {
-                        Outcome.RETRY_LATER
-                    } else {
-                        clearPendingJoin(payload.activityId, activities)
-                        Outcome.REJECTED
-                    }
-                }
-                e.code() == 401 -> Outcome.RETRY_LATER
-                e.code() in 400..499 -> {
-                    clearPendingJoin(payload.activityId, activities)
-                    Outcome.REJECTED
-                }
-                else -> Outcome.RETRY_LATER
-            }
-
-        } catch (e: IOException) {
-            Outcome.RETRY_LATER
-
-        } catch (e: Exception) {
-            Outcome.RETRY_LATER
-        }
-    }
-
-    /**
      * Reconstruye la petición de creación desde el payload JSON y la envía al backend.
      */
     private suspend fun sendCreate(action: PendingAction, queue: PendingActionRepository): Outcome {
@@ -162,26 +103,6 @@ class SyncWorker(
         } catch (e: Exception) {
             creationFailureOutcome(e)
         }
-    }
-
-    private suspend fun confirmJoin(id: String, activities: ActivityDao) {
-        activities.getActivityById(id)?.let {
-            val updated = it.copy(joined = true, pendingSync = false)
-            activities.insertActivity(updated)
-            ActivityMemoryCache.put(updated.toActivity())
-        }
-        ActivityRepository(activities).getActivityById(id)
-        ActivityChanges.notifyChanged()
-    }
-
-    private suspend fun clearPendingJoin(id: String, activities: ActivityDao) {
-        activities.getActivityById(id)?.let {
-            val updated = it.copy(joined = false, pendingSync = false, participants = (it.participants - 1).coerceAtLeast(0))
-            activities.insertActivity(updated)
-            ActivityMemoryCache.put(updated.toActivity())
-        }
-        ActivityRepository(activities).getActivityById(id)
-        ActivityChanges.notifyChanged()
     }
 
     /** Possible results, including retained actions that need correction before retrying. */

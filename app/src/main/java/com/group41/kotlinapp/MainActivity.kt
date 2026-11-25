@@ -1,8 +1,11 @@
 package com.group41.kotlinapp
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.LayoutInflater
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -14,10 +17,16 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +50,7 @@ import kotlinx.coroutines.flow.combine
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,20 +63,30 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.ViewCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.repository.ActivityRepository
+import com.group41.kotlinapp.repository.PendingActionRepository
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.ui.theme.LlamallaBlack
 import com.group41.kotlinapp.ui.theme.LlamallaBlue
 import com.group41.kotlinapp.ui.theme.LlamallaRose
+import com.group41.kotlinapp.ui.theme.LlamallaWhite
 import com.group41.kotlinapp.viewmodel.RecommendationsViewModel
 
 class MainActivity : ComponentActivity() {
 
+    private var selectedTab by mutableIntStateOf(R.id.nav_home)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        selectedTab = savedInstanceState?.getInt(TAB_KEY) ?: intent.requestedTab()
 
         val recommendationsViewModel =
             ViewModelProvider(this)[RecommendationsViewModel::class.java]
@@ -75,11 +95,92 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             KotlinAppTheme {
-                RecommendationScreen(
-                    viewModel = recommendationsViewModel
-                )
+                BackHandler(enabled = selectedTab == R.id.nav_activities) { selectedTab = R.id.nav_home }
+                Column(
+                    Modifier.fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                ) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (selectedTab == R.id.nav_activities) {
+                            ActivitiesTab()
+                        } else {
+                            RecommendationScreen(viewModel = recommendationsViewModel)
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().background(LlamallaWhite).navigationBarsPadding()) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxWidth(),
+                            factory = { context ->
+                                val bar = LayoutInflater.from(context)
+                                    .inflate(R.layout.view_bottom_navigation, null) as BottomNavigationView
+                                // Compose pads the bar for system navigation insets.
+                                ViewCompat.setOnApplyWindowInsetsListener(bar) { _, insets -> insets }
+                                bar.setOnItemSelectedListener { item ->
+                                    when (item.itemId) {
+                                        R.id.nav_home, R.id.nav_activities -> {
+                                            selectedTab = item.itemId
+                                            true
+                                        }
+                                        R.id.nav_profile -> {
+                                            startActivity(Intent(this@MainActivity, ProfileActivity::class.java))
+                                            false
+                                        }
+                                        else -> false
+                                    }
+                                }
+                                bar
+                            },
+                            update = { it.menu.findItem(selectedTab).isChecked = true }
+                        )
+                    }
+                }
             }
         }
+    }
+
+    @Composable
+    private fun ActivitiesTab() {
+        val database = (application as App).database
+        val repository = remember(database) {
+            ActivityRepository(
+                activityDao = database.activityDao(),
+                pendingActions = PendingActionRepository(database)
+            )
+        }
+        val connectivity = remember { ConnectivityObserver(applicationContext) }
+        // Connectivity updates the offline message and lets the screen retry missing details.
+        val isOnline by connectivity.isOnline.collectAsStateWithLifecycle(connectivity.currentlyOnline())
+        MyActivitiesScreen(
+            userId = ApiClient.tokens.userId,
+            enrollmentDao = database.userEnrollmentDao(),
+            isOnline = isOnline,
+            onOpenActivity = { startActivity(ActivityDetailActivity.createIntent(this, it)) },
+            cancelEnrollment = { repository.cancelEnrollment(it) },
+            loadActivity = { repository.getActivityById(it) }
+        )
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        selectedTab = intent.requestedTab()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt(TAB_KEY, selectedTab)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun Intent.requestedTab(): Int =
+        if (getIntExtra(TAB_KEY, R.id.nav_home) == R.id.nav_activities) R.id.nav_activities else R.id.nav_home
+
+    companion object {
+        private const val TAB_KEY = "main_tab"
+
+        /** Returns from Profile to the requested tab in the existing MainActivity. */
+        internal fun tabIntent(context: Context, tab: Int): Intent =
+            Intent(context, MainActivity::class.java)
+                .putExtra(TAB_KEY, tab)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 }
 
@@ -151,7 +252,8 @@ fun RecommendationScreen(
     )
 
     Scaffold(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top)
     ) { innerPadding ->
 
         LazyColumn(
@@ -219,39 +321,17 @@ fun RecommendationScreen(
                     Spacer(modifier = Modifier.height(14.dp))
                 }
 
-                Row(
+                Button(
+                    onClick = {
+                        context.startActivity(Intent(context, NearbyMeetingPointActivity::class.java))
+                    },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LlamallaBlue,
+                        contentColor = LlamallaBlack
+                    )
                 ) {
-                    Button(
-                        onClick = {
-                            context.startActivity(
-                                Intent(context, ProfileActivity::class.java)
-                            )
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LlamallaBlue,
-                            contentColor = LlamallaBlack
-                        )
-                    ) {
-                        Text("Perfil")
-                    }
-
-                    Button(
-                        onClick = {
-                            context.startActivity(
-                                Intent(context, NearbyMeetingPointActivity::class.java)
-                            )
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LlamallaBlue,
-                            contentColor = LlamallaBlack
-                        )
-                    ) {
-                        Text("Cercanas")
-                    }
+                    Text("Cercanas")
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -560,12 +640,13 @@ fun RecommendationCard(
                         isJoining = true
                         joinError = null
 
-                        viewModel.joinActivity(
+                        // Allow users to reverse a pending join or cancellation from the card.
+                        val joining = !isJoined
+                        viewModel.changeEnrollment(
                             activity = activity,
-                            // queued = true significa que no habia internet y la inscripcion
-                            // se guardo para mandarla despues.
+                            joined = joining,
                             onSuccess = { queued ->
-                                isJoined = true
+                                isJoined = joining
                                 isJoining = false
                                 isPendingSync = queued
                             },
@@ -575,7 +656,7 @@ fun RecommendationCard(
                             }
                         )
                     },
-                    enabled = !isJoined && !isPendingSync && !isJoining,
+                    enabled = !isJoining,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -586,12 +667,11 @@ fun RecommendationCard(
                     )
                 ) {
                     Text(
-                        // "Pendiente" y no "Unido" mientras el servidor no confirme: el
-                        // reloj dice que esta guardado pero todavia en camino.
                         text = when {
-                            isJoining -> "Uniendo..."
-                            isJoined && isPendingSync -> "Pendiente de enviar ⏱"
-                            isJoined -> "Unido ✓"
+                            isJoining -> "Actualizando..."
+                            isJoined && isPendingSync -> "Inscripcion pendiente · Cancelar"
+                            isPendingSync -> "Cancelacion pendiente · Volver a unirme"
+                            isJoined -> "Cancelar inscripcion"
                             else -> "Unirme"
                         }
                     )
