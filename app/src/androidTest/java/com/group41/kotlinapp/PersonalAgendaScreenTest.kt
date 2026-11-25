@@ -7,8 +7,10 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.lifecycle.ViewModel
@@ -22,6 +24,7 @@ import com.group41.kotlinapp.data.local.AppDatabase
 import com.group41.kotlinapp.data.local.entity.UserEnrollmentEntity
 import com.group41.kotlinapp.data.local.toEntity
 import com.group41.kotlinapp.model.Activity
+import com.group41.kotlinapp.storage.AgendaPreferences
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.viewmodel.AgendaViewModel
 import java.time.LocalDate
@@ -34,9 +37,56 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
+/*
+ * Exercises the offline agenda with an isolated Room database and test settings.
+ * The tests cover enrollment updates, reopening Room, the export button, and
+ * whether hiding pending enrollments updates both calendar markers and cards.
+ */
+
 @RunWith(AndroidJUnit4::class)
 class PersonalAgendaScreenTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun hidingPendingOfflineRemovesTheirCalendarMarkerAndDailyCards() {
+        val date = LocalDate.of(2026, 11, 18)
+        val startsAt = date.atTime(9, 30).atZone(ZoneId.systemDefault())
+        val preferences = mutableStateOf(AgendaPreferences())
+        val activities = listOf(
+            AgendaActivity("join", "Inscripción de prueba", startsAt, null, AgendaEnrollmentStatus.PENDING_JOIN),
+            AgendaActivity("cancel", "Cancelación de prueba", startsAt, null, AgendaEnrollmentStatus.PENDING_CANCELLATION),
+            AgendaActivity("confirmed", "Confirmada", startsAt.plusDays(1), null, AgendaEnrollmentStatus.CONFIRMED)
+        )
+        compose.setContent {
+            KotlinAppTheme {
+                PersonalAgendaScreen(
+                    activities,
+                    isOnline = false,
+                    onBack = {},
+                    onExportCalendar = {},
+                    initialDate = date,
+                    preferences = preferences.value,
+                    onShowPendingChange = { preferences.value = preferences.value.copy(showPending = it) }
+                )
+            }
+        }
+        val marker = "miércoles 18 de noviembre, con actividades"
+        val unmarked = "miércoles 18 de noviembre"
+        compose.onNode(hasScrollAction()).performScrollToNode(hasContentDescription(marker))
+        compose.onNodeWithContentDescription(marker).assertIsDisplayed()
+        assertAgendaText("Inscripción de prueba")
+        assertAgendaText("Cancelación de prueba")
+
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Mostrar inscripciones pendientes"))
+        compose.onNodeWithText("Mostrar inscripciones pendientes").performClick()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasContentDescription(unmarked))
+        compose.onNodeWithContentDescription(unmarked).assertIsDisplayed()
+        compose.onNodeWithContentDescription(marker).assertDoesNotExist()
+        assertAgendaText("No tienes actividades para este día.")
+        compose.onNodeWithText("Inscripción de prueba").assertDoesNotExist()
+        compose.onNodeWithText("Cancelación de prueba").assertDoesNotExist()
+        compose.onNodeWithText("Exportar calendario").assertIsEnabled()
+    }
 
     @Test
     fun showsLocalScheduleUpdatesAndRestoresItFromDiskOffline() {
@@ -54,6 +104,7 @@ class PersonalAgendaScreenTest {
         )
         var database = openDatabase()
         val store = ViewModelStore()
+        val preferences = IsolatedAgendaPreferences(app)
         val currentModel = mutableStateOf<AgendaViewModel?>(null)
         var exportClicks = 0
         fun openAgenda() {
@@ -61,7 +112,7 @@ class PersonalAgendaScreenTest {
                 val factory = object : ViewModelProvider.Factory {
                     @Suppress("UNCHECKED_CAST")
                     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                        AgendaViewModel(app, database.userEnrollmentDao(), flowOf(enrollment.userId)) as T
+                        AgendaViewModel(app, database.userEnrollmentDao(), flowOf(enrollment.userId), preferences.store) as T
                 }
                 currentModel.value = ViewModelProvider(store, factory)[AgendaViewModel::class.java]
             }
@@ -86,9 +137,9 @@ class PersonalAgendaScreenTest {
             compose.setContent {
                 KotlinAppTheme {
                     currentModel.value?.let { model ->
-                        val activities by model.activities.collectAsStateWithLifecycle()
+                        val state by model.uiState.collectAsStateWithLifecycle()
                         PersonalAgendaScreen(
-                            activities,
+                            state.activities,
                             isOnline = false,
                             onBack = {},
                             onExportCalendar = { exportClicks++ },
@@ -98,7 +149,7 @@ class PersonalAgendaScreenTest {
                 }
             }
             openAgenda()
-            compose.waitUntil(5_000) { currentModel.value?.activities?.value?.isNotEmpty() == true }
+            compose.waitUntil(5_000) { currentModel.value?.uiState?.value?.activities?.isNotEmpty() == true }
             compose.onNodeWithText("Exportar calendario").assertIsEnabled().performClick()
             compose.runOnIdle { assertEquals(1, exportClicks) }
             assertAgendaText("No tienes actividades para este día.")
@@ -112,7 +163,7 @@ class PersonalAgendaScreenTest {
                 database.userEnrollmentDao().upsert(enrollment.copy(joined = false, cancellationPending = true))
             }
             compose.waitUntil(5_000) {
-                currentModel.value?.activities?.value?.singleOrNull()?.enrollmentStatus ==
+                currentModel.value?.uiState?.value?.activities?.singleOrNull()?.enrollmentStatus ==
                     AgendaEnrollmentStatus.PENDING_CANCELLATION
             }
             assertAgendaText("Cancelación pendiente")
@@ -127,7 +178,7 @@ class PersonalAgendaScreenTest {
             database.close()
             database = openDatabase()
             openAgenda()
-            compose.waitUntil(5_000) { currentModel.value?.activities?.value?.isNotEmpty() == true }
+            compose.waitUntil(5_000) { currentModel.value?.uiState?.value?.activities?.isNotEmpty() == true }
             compose.onNodeWithText("Sin conexión. Puedes consultar las actividades disponibles.").assertIsDisplayed()
             compose.onNode(hasScrollAction()).performScrollToNode(hasText("18"))
             compose.onNodeWithText("18").performClick()
@@ -139,7 +190,7 @@ class PersonalAgendaScreenTest {
             runBlocking {
                 database.userEnrollmentDao().upsert(enrollment.copy(joined = false, canceledAt = 1L))
             }
-            compose.waitUntil(5_000) { currentModel.value?.activities?.value?.isEmpty() == true }
+            compose.waitUntil(5_000) { currentModel.value?.uiState?.value?.activities?.isEmpty() == true }
             assertAgendaText("No tienes actividades para este día.")
         } finally {
             compose.runOnIdle {
@@ -147,6 +198,7 @@ class PersonalAgendaScreenTest {
                 store.clear()
             }
             database.close()
+            preferences.close()
             app.deleteDatabase(databaseName)
         }
     }

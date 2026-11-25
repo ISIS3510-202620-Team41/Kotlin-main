@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -26,11 +27,12 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.group41.kotlinapp.storage.AgendaPreferences
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.ui.theme.LlamallaBlue
 import com.group41.kotlinapp.ui.theme.LlamallaRose
@@ -58,6 +61,16 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+
+/*
+ * Renders the personal agenda, including the monthly calendar, daily activity
+ * cards, and display preferences. A single filtered set of activities drives
+ * both the calendar markers and the daily list.
+ *
+ * The screen starts from the opening date supplied by its caller and keeps the
+ * current selection while it is visible. It reports date and switch changes
+ * through callbacks so the caller can persist them. Export is also a callback.
+ */
 
 /** Activity details with the scheduled timestamps in their original zone or offset. */
 internal data class AgendaActivity(
@@ -90,17 +103,29 @@ internal fun PersonalAgendaScreen(
     isOnline: Boolean,
     onBack: () -> Unit,
     onExportCalendar: (() -> Unit)? = null,
-    initialDate: LocalDate = LocalDate.now()
+    initialDate: LocalDate = LocalDate.now(),
+    preferences: AgendaPreferences? = null,
+    onShowPendingChange: (Boolean) -> Unit = {},
+    onRememberDateChange: (Boolean, LocalDate) -> Unit = { _, _ -> },
+    onDateSelected: (LocalDate) -> Unit = {}
 ) {
-    // Save the epoch day so Android can restore the selection and its month together.
-    var selectedEpochDay by rememberSaveable(initialDate) {
-        mutableLongStateOf(initialDate.toEpochDay())
+    // Start from the account's saved date once. Later DataStore emissions must not undo a newer tap.
+    var selectedEpochDay by remember { mutableLongStateOf(initialDate.toEpochDay()) }
+    val selectDate: (LocalDate) -> Unit = { date ->
+        selectedEpochDay = date.toEpochDay()
+        onDateSelected(date)
     }
     val selectedDate = LocalDate.ofEpochDay(selectedEpochDay)
     val month = YearMonth.from(selectedDate)
     // Group and display events in the device's time zone so they match the calendar day.
     val displayZone = ZoneId.systemDefault()
-    val activitiesByDate = activities.groupBy {
+    // Markers and the daily list share the same filtered activities.
+    val visibleActivities = if (preferences?.showPending == false) {
+        activities.filter { it.enrollmentStatus == AgendaEnrollmentStatus.CONFIRMED }
+    } else {
+        activities
+    }
+    val activitiesByDate = visibleActivities.groupBy {
         it.startsAt.withZoneSameInstant(displayZone).toLocalDate()
     }
     val dayActivities = activitiesByDate[selectedDate].orEmpty().sortedBy { it.startsAt.toInstant() }
@@ -143,18 +168,28 @@ internal fun PersonalAgendaScreen(
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            if (preferences != null) {
+                item {
+                    AgendaCard {
+                        AgendaPreferenceSwitch("Mostrar inscripciones pendientes", preferences.showPending, onShowPendingChange)
+                        AgendaPreferenceSwitch("Recordar la fecha seleccionada", preferences.rememberDate) {
+                            onRememberDateChange(it, selectedDate)
+                        }
+                    }
+                }
+            }
             item {
                 AgendaMonth(
                     month = month,
                     selectedDate = selectedDate,
                     activityDates = activitiesByDate.keys,
-                    onSelectDate = { selectedEpochDay = it.toEpochDay() },
+                    onSelectDate = selectDate,
                     onChangeMonth = { offset ->
                         val target = month.plusMonths(offset)
                         // Keep the same day number where possible, including across shorter months.
-                        selectedEpochDay = target.atDay(
+                        selectDate(target.atDay(
                             selectedDate.dayOfMonth.coerceAtMost(target.lengthOfMonth())
-                        ).toEpochDay()
+                        ))
                     }
                 )
             }
@@ -217,6 +252,20 @@ internal fun PersonalAgendaScreen(
         ) {
             Text("Exportar calendario")
         }
+    }
+}
+
+@Composable
+private fun AgendaPreferenceSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 

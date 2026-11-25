@@ -10,6 +10,10 @@ import com.group41.kotlinapp.App
 import com.group41.kotlinapp.data.local.dao.EnrolledActivity
 import com.group41.kotlinapp.data.local.dao.UserEnrollmentDao
 import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.storage.AgendaPreferences
+import com.group41.kotlinapp.storage.AgendaPreferencesStore
+import java.io.IOException
+import java.time.LocalDate
 import java.time.ZonedDateTime
 import java.time.format.DateTimeParseException
 import kotlinx.coroutines.flow.Flow
@@ -18,25 +22,64 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 
-/** Observes the signed-in account's Room enrollments for the offline agenda. */
+/*
+ * Combines the signed-in account's Room enrollments with its DataStore settings
+ * for the personal agenda. When the account changes, observation for the former
+ * account stops and the screen waits for the new account's settings.
+ *
+ * Enrollment rows are mapped to scheduled activities here. Calendar export
+ * reads a fresh Room snapshot independently of the agenda's display preferences.
+ */
+
+/** A snapshot labeled with its owner so the UI never shows another account's data. */
+internal data class AgendaUiState(
+    val userId: String? = null,
+    val preferences: AgendaPreferences? = null,
+    val activities: List<AgendaActivity> = emptyList()
+)
+
+/** Observes the signed-in account's Room enrollments and offline display preferences together. */
 internal class AgendaViewModel internal constructor(
     application: Application,
     private val enrollmentDao: UserEnrollmentDao,
-    accountIds: Flow<String?>
+    accountIds: Flow<String?>,
+    private val preferencesStore: AgendaPreferencesStore
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(
         application,
         (application as App).database.userEnrollmentDao(),
-        ApiClient.tokens.userIds
+        ApiClient.tokens.userIds,
+        application.agendaPreferences
     )
 
-    private val _activities = MutableStateFlow<List<AgendaActivity>>(emptyList())
-    val activities: StateFlow<List<AgendaActivity>> = _activities.asStateFlow()
+    private val _uiState = MutableStateFlow(AgendaUiState())
+    val uiState: StateFlow<AgendaUiState> = _uiState.asStateFlow()
+
+    fun setShowPending(userId: String, enabled: Boolean) =
+        updatePreferences { preferencesStore.setShowPending(userId, enabled) }
+
+    fun setRememberDate(userId: String, enabled: Boolean, date: LocalDate) =
+        updatePreferences { preferencesStore.setRememberDate(userId, enabled, date) }
+
+    fun selectDate(userId: String, date: LocalDate) =
+        updatePreferences { preferencesStore.saveSelectedDate(userId, date) }
+
+    private fun updatePreferences(write: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                write()
+            } catch (error: IOException) {
+                Log.e("AgendaViewModel", "Unable to save agenda preferences", error)
+            }
+        }
+    }
 
     /** Reads the requested account's current Room rows when the user starts an export. */
     suspend fun activitiesForExport(userId: String): List<AgendaActivity> =
@@ -46,9 +89,9 @@ internal class AgendaViewModel internal constructor(
         viewModelScope.launch {
             accountIds.distinctUntilChanged().collectLatest { userId ->
                 // Cancel the previous Room observation and clear its rows before reading the next account.
-                _activities.value = emptyList()
+                _uiState.value = AgendaUiState(userId)
                 if (!userId.isNullOrBlank()) {
-                    enrollmentDao.observeEnrolledActivities(userId)
+                    val activities = enrollmentDao.observeEnrolledActivities(userId)
                         .map { rows ->
                             rows.mapNotNull { it.toAgendaActivity() }.sortedBy { it.startsAt.toInstant() }
                         }
@@ -56,7 +99,10 @@ internal class AgendaViewModel internal constructor(
                             Log.e("AgendaViewModel", "Unable to read agenda from Room", error)
                             emit(emptyList())
                         }
-                        .collect { _activities.value = it }
+                        .onStart { emit(emptyList()) }
+                    preferencesStore.observe(userId).combine(activities) { preferences, rows ->
+                        AgendaUiState(userId, preferences, rows)
+                    }.collect { _uiState.value = it }
                 }
             }
         }

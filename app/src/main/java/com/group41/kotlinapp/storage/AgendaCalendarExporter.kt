@@ -16,6 +16,15 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/*
+ * Converts confirmed agenda activities into a local iCalendar file for offline
+ * sharing. It writes times in UTC, escapes activity names and locations, and
+ * folds long lines without breaking UTF-8 characters.
+ *
+ * Each export gets a unique file in the app's exports directory. The Android
+ * share intent carries a FileProvider URI with temporary read access.
+ */
+
 /** Writes confirmed agenda events to a private iCalendar file for offline sharing. */
 internal object AgendaCalendarExporter {
     private const val MIME_TYPE = "text/calendar"

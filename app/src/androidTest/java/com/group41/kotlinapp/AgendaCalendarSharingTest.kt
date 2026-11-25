@@ -11,6 +11,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
+/*
+ * Exercises calendar sharing on Android by creating an export and reading it
+ * through FileProvider. It checks that the share intent supplies a calendar
+ * MIME type and grants read access to the file.
+ */
+
 @RunWith(AndroidJUnit4::class)
 class AgendaCalendarSharingTest {
     @Test

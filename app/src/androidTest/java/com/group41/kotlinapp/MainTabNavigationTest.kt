@@ -1,6 +1,8 @@
 package com.group41.kotlinapp
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -17,7 +19,12 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.group41.kotlinapp.data.local.AppDatabase
 import com.group41.kotlinapp.network.ApiService
 import java.lang.reflect.Proxy
-import kotlinx.coroutines.flow.flowOf
+import java.time.LocalDate
+import java.time.format.TextStyle
+import java.util.Locale
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -30,6 +37,7 @@ import retrofit2.Response
 @RunWith(AndroidJUnit4::class)
 class MainTabNavigationTest {
     private val compose = createAndroidComposeRule<MainActivity>()
+    private val accountIds = MutableStateFlow<String?>("agenda-navigation-test")
 
     @get:Rule
     val rules: RuleChain = RuleChain.outerRule(TestRule { base, _ ->
@@ -37,18 +45,19 @@ class MainTabNavigationTest {
             override fun evaluate() {
                 val context = InstrumentationRegistry.getInstrumentation().targetContext
                 val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
-                val userId = "agenda-navigation-test"
+                val preferences = IsolatedAgendaPreferences(context)
                 val api = Proxy.newProxyInstance(ApiService::class.java.classLoader, arrayOf(ApiService::class.java)) {
                     _, method, _ ->
                     check(method.name == "recommendations")
                     Response.success(JsonArray())
                 } as ApiService
                 MainActivity.dependenciesForTest =
-                    MainActivityDependencies(database, flowOf(userId), { userId }, { api }, { true })
+                    MainActivityDependencies(database, accountIds, { accountIds.value }, { api }, { true }, preferences.store)
                 try {
                     base.evaluate()
                 } finally {
                     MainActivity.dependenciesForTest = null
+                    preferences.close()
                     database.close()
                 }
             }
@@ -75,6 +84,47 @@ class MainTabNavigationTest {
 
         onView(withId(R.id.nav_home)).perform(click())
         assertSelected(R.id.nav_home)
+    }
+
+    @Test
+    fun remembersTheSelectedMonthPerAccountAndOpensTodayWhenRememberingIsDisabled() {
+        val preferences = checkNotNull(MainActivity.dependenciesForTest).agendaPreferences
+        val firstAccount = checkNotNull(accountIds.value)
+        val today = LocalDate.now()
+        val initialDate = today.minusMonths(3).withDayOfMonth(10)
+        runBlocking { preferences.setRememberDate(firstAccount, true, initialDate) }
+
+        compose.activityRule.scenario.onActivity { activity ->
+            activity.findViewById<BottomNavigationView>(R.id.bottom_navigation).selectedItemId = R.id.nav_activities
+        }
+        compose.onNodeWithText("Ver agenda").performClick()
+        compose.onNodeWithText(monthLabel(initialDate)).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Mes siguiente").performClick()
+        val nextDate = initialDate.plusMonths(1)
+        compose.waitUntil(5_000) {
+            runBlocking { preferences.observe(firstAccount).first().selectedEpochDay == nextDate.toEpochDay() }
+        }
+        compose.activityRule.scenario.recreate()
+        compose.onNodeWithText(monthLabel(nextDate)).assertIsDisplayed()
+
+        accountIds.value = "other-agenda-account"
+        compose.onNodeWithText(monthLabel(today)).assertIsDisplayed()
+        compose.onNodeWithText("Recordar la fecha seleccionada").assertIsOff()
+        accountIds.value = firstAccount
+        compose.onNodeWithText(monthLabel(nextDate)).assertIsDisplayed()
+        compose.onNodeWithText("Recordar la fecha seleccionada").assertIsOn().performClick()
+        compose.waitUntil(5_000) {
+            runBlocking { !preferences.observe(firstAccount).first().rememberDate }
+        }
+        compose.onNodeWithContentDescription("Volver").performClick()
+        compose.onNodeWithText("Ver agenda").performClick()
+        compose.onNodeWithText(monthLabel(today)).assertIsDisplayed()
+    }
+
+    private fun monthLabel(date: LocalDate): String {
+        val locale = Locale.forLanguageTag("es-CO")
+        val name = date.month.getDisplayName(TextStyle.FULL, locale).replaceFirstChar { it.titlecase(locale) }
+        return "$name de ${date.year}"
     }
 
     @Test

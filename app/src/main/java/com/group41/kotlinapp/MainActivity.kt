@@ -36,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -57,6 +58,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,13 +90,16 @@ import com.group41.kotlinapp.repository.ActivityRepository
 import com.group41.kotlinapp.repository.PendingActionRepository
 import com.group41.kotlinapp.repository.PreferencesRepository
 import com.group41.kotlinapp.storage.AgendaCalendarExporter
+import com.group41.kotlinapp.storage.AgendaPreferencesStore
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.ui.theme.LlamallaBlack
 import com.group41.kotlinapp.ui.theme.LlamallaBlue
 import com.group41.kotlinapp.ui.theme.LlamallaRose
 import com.group41.kotlinapp.ui.theme.LlamallaWhite
 import com.group41.kotlinapp.viewmodel.AgendaViewModel
+import com.group41.kotlinapp.viewmodel.AgendaUiState
 import com.group41.kotlinapp.viewmodel.RecommendationsViewModel
+import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 
@@ -104,7 +109,8 @@ internal data class MainActivityDependencies(
     val accountIds: Flow<String?>,
     val currentUserId: () -> String?,
     val api: () -> ApiService,
-    val online: () -> Boolean
+    val online: () -> Boolean,
+    val agendaPreferences: AgendaPreferencesStore
 ) {
     /** Uses the same database and account source for reads and enrollment changes. */
     fun activityRepository() = ActivityRepository(
@@ -122,18 +128,25 @@ class MainActivity : ComponentActivity() {
     private var selectedTab by mutableIntStateOf(R.id.nav_home)
     private var agendaOpen by mutableStateOf(false)
     private val dependencies by lazy {
+        val app = application as App
         dependenciesForTest ?: MainActivityDependencies(
-            (application as App).database,
+            app.database,
             ApiClient.tokens.userIds,
             { ApiClient.tokens.userId },
             { ApiClient.api },
-            { ApiClient.isOnline() }
+            { ApiClient.isOnline() },
+            app.agendaPreferences
         )
     }
     private val viewModels by lazy {
         ViewModelProvider(this, viewModelFactory {
             initializer {
-                AgendaViewModel(application, dependencies.database.userEnrollmentDao(), dependencies.accountIds)
+                AgendaViewModel(
+                    application,
+                    dependencies.database.userEnrollmentDao(),
+                    dependencies.accountIds,
+                    dependencies.agendaPreferences
+                )
             }
             initializer {
                 RecommendationsViewModel(
@@ -249,29 +262,18 @@ class MainActivity : ComponentActivity() {
         val connectivity = remember { ConnectivityObserver(applicationContext) }
         val isOnline by connectivity.isOnline.collectAsStateWithLifecycle(connectivity.currentlyOnline())
         if (agendaOpen) {
-            val activities by agendaViewModel.activities.collectAsStateWithLifecycle()
-            val scope = rememberCoroutineScope()
-            var exporting by remember { mutableStateOf(false) }
-            PersonalAgendaScreen(
-                activities = activities,
-                isOnline = isOnline,
-                onBack = { agendaOpen = false },
-                onExportCalendar = if (exporting || userId.isNullOrBlank()) null else {
-                    {
-                        val accountId = dependencies.currentUserId()
-                        if (!exporting && !accountId.isNullOrBlank() && accountId == userId) {
-                            exporting = true
-                            scope.launch {
-                                try {
-                                    shareAgenda(accountId)
-                                } finally {
-                                    exporting = false
-                                }
-                            }
-                        }
-                    }
+            val state by agendaViewModel.uiState.collectAsStateWithLifecycle()
+            val preferences = state.preferences.takeIf { state.userId == userId }
+            // Wait for the account's saved preferences before initializing its calendar selection.
+            if (!userId.isNullOrBlank() && preferences == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
-            )
+                return
+            }
+            key(userId) {
+                AgendaDestination(userId, isOnline, state.takeIf { it.userId == userId })
+            }
             return
         }
         val database = dependencies.database
@@ -284,6 +286,44 @@ class MainActivity : ComponentActivity() {
             cancelEnrollment = { repository.cancelEnrollment(it) },
             loadActivity = { repository.getActivityById(it) },
             onOpenAgenda = { agendaOpen = true }
+        )
+    }
+
+    @Composable
+    private fun AgendaDestination(userId: String?, isOnline: Boolean, state: AgendaUiState?) {
+        val scope = rememberCoroutineScope()
+        var exporting by remember { mutableStateOf(false) }
+        val preferences = state?.preferences
+        PersonalAgendaScreen(
+            activities = state?.activities.orEmpty(),
+            isOnline = isOnline,
+            onBack = { agendaOpen = false },
+            initialDate = preferences?.openingDate() ?: LocalDate.now(),
+            preferences = preferences,
+            onShowPendingChange = { enabled ->
+                userId?.let { agendaViewModel.setShowPending(it, enabled) }
+            },
+            onRememberDateChange = { enabled, date ->
+                userId?.let { agendaViewModel.setRememberDate(it, enabled, date) }
+            },
+            onDateSelected = { date ->
+                userId?.let { agendaViewModel.selectDate(it, date) }
+            },
+            onExportCalendar = if (exporting || userId.isNullOrBlank()) null else {
+                {
+                    val accountId = dependencies.currentUserId()
+                    if (!exporting && !accountId.isNullOrBlank() && accountId == userId) {
+                        exporting = true
+                        scope.launch {
+                            try {
+                                shareAgenda(accountId)
+                            } finally {
+                                exporting = false
+                            }
+                        }
+                    }
+                }
+            }
         )
     }
 

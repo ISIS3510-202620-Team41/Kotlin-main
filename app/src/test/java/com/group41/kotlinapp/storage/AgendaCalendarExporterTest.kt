@@ -10,6 +10,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/*
+ * Checks the generated iCalendar text with fixed timestamps and enrollment states.
+ * It covers UTC conversion, text escaping, UTF-8 line folding, and omission of
+ * pending enrollments or unavailable end times.
+ */
+
 class AgendaCalendarExporterTest {
     private val start = ZonedDateTime.parse("2026-11-25T09:00:00-05:00")
     private val confirmed = AgendaActivity(
