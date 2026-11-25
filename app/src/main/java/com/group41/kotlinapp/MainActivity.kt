@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -59,6 +60,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,14 +73,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
+import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import coil.compose.AsyncImage
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.group41.kotlinapp.model.Activity
+import com.group41.kotlinapp.data.local.AppDatabase
 import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.network.ApiService
 import com.group41.kotlinapp.repository.ActivityRepository
 import com.group41.kotlinapp.repository.PendingActionRepository
+import com.group41.kotlinapp.repository.PreferencesRepository
+import com.group41.kotlinapp.storage.AgendaCalendarExporter
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.ui.theme.LlamallaBlack
 import com.group41.kotlinapp.ui.theme.LlamallaBlue
@@ -86,13 +95,56 @@ import com.group41.kotlinapp.ui.theme.LlamallaRose
 import com.group41.kotlinapp.ui.theme.LlamallaWhite
 import com.group41.kotlinapp.viewmodel.AgendaViewModel
 import com.group41.kotlinapp.viewmodel.RecommendationsViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+
+/** Supplies one session and repository environment to both main tabs and the agenda. */
+internal data class MainActivityDependencies(
+    val database: AppDatabase,
+    val accountIds: Flow<String?>,
+    val currentUserId: () -> String?,
+    val api: () -> ApiService,
+    val online: () -> Boolean
+) {
+    /** Uses the same database and account source for reads and enrollment changes. */
+    fun activityRepository() = ActivityRepository(
+        activityDao = database.activityDao(),
+        pendingActions = PendingActionRepository(database, api),
+        apiProvider = api,
+        online = online,
+        currentUserId = currentUserId
+    )
+}
 
 /** Hosts the main tabs and agenda, and prepares enrollment thumbnails while visible. */
 class MainActivity : ComponentActivity() {
 
     private var selectedTab by mutableIntStateOf(R.id.nav_home)
     private var agendaOpen by mutableStateOf(false)
-    private val agendaViewModel by lazy { ViewModelProvider(this)[AgendaViewModel::class.java] }
+    private val dependencies by lazy {
+        dependenciesForTest ?: MainActivityDependencies(
+            (application as App).database,
+            ApiClient.tokens.userIds,
+            { ApiClient.tokens.userId },
+            { ApiClient.api },
+            { ApiClient.isOnline() }
+        )
+    }
+    private val viewModels by lazy {
+        ViewModelProvider(this, viewModelFactory {
+            initializer {
+                AgendaViewModel(application, dependencies.database.userEnrollmentDao(), dependencies.accountIds)
+            }
+            initializer {
+                RecommendationsViewModel(
+                    application,
+                    dependencies.activityRepository(),
+                    PreferencesRepository(dependencies.database.preferencesDao())
+                )
+            }
+        })
+    }
+    private val agendaViewModel by lazy { viewModels[AgendaViewModel::class.java] }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -102,12 +154,13 @@ class MainActivity : ComponentActivity() {
         observeActivityThumbnails()
 
         val recommendationsViewModel =
-            ViewModelProvider(this)[RecommendationsViewModel::class.java]
+            viewModels[RecommendationsViewModel::class.java]
 
         enableEdgeToEdge()
 
         setContent {
             KotlinAppTheme {
+                val userId by dependencies.accountIds.collectAsStateWithLifecycle(dependencies.currentUserId())
                 BackHandler(enabled = selectedTab == R.id.nav_activities) {
                     if (agendaOpen) agendaOpen = false else selectedTab = R.id.nav_home
                 }
@@ -117,9 +170,9 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (selectedTab == R.id.nav_activities) {
-                            ActivitiesTab()
+                            ActivitiesTab(userId)
                         } else {
-                            RecommendationScreen(viewModel = recommendationsViewModel)
+                            RecommendationScreen(recommendationsViewModel, userId, dependencies.currentUserId)
                         }
                     }
                     if (!agendaOpen) Box(Modifier.fillMaxWidth().background(LlamallaWhite).navigationBarsPadding()) {
@@ -163,10 +216,10 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 // Cancel the old Room observer and its downloads when the account changes.
-                ApiClient.tokens.userIds.collectLatest { userId ->
+                dependencies.accountIds.collectLatest { userId ->
                     if (userId.isNullOrBlank()) return@collectLatest
 
-                    app.database.userEnrollmentDao().observeEnrolledActivities(userId)
+                    dependencies.database.userEnrollmentDao().observeEnrolledActivities(userId)
                         .combine(connectivity.isOnline) { enrollments, online ->
                             if (online) {
                                 enrollments.mapNotNull { enrollment ->
@@ -192,26 +245,37 @@ class MainActivity : ComponentActivity() {
 
     /** Hosts both Activities destinations so they share the same connectivity observation. */
     @Composable
-    private fun ActivitiesTab() {
+    private fun ActivitiesTab(userId: String?) {
         val connectivity = remember { ConnectivityObserver(applicationContext) }
         val isOnline by connectivity.isOnline.collectAsStateWithLifecycle(connectivity.currentlyOnline())
         if (agendaOpen) {
             val activities by agendaViewModel.activities.collectAsStateWithLifecycle()
+            val scope = rememberCoroutineScope()
+            var exporting by remember { mutableStateOf(false) }
             PersonalAgendaScreen(
                 activities = activities,
                 isOnline = isOnline,
-                onBack = { agendaOpen = false }
+                onBack = { agendaOpen = false },
+                onExportCalendar = if (exporting || userId.isNullOrBlank()) null else {
+                    {
+                        val accountId = dependencies.currentUserId()
+                        if (!exporting && !accountId.isNullOrBlank() && accountId == userId) {
+                            exporting = true
+                            scope.launch {
+                                try {
+                                    shareAgenda(accountId)
+                                } finally {
+                                    exporting = false
+                                }
+                            }
+                        }
+                    }
+                }
             )
             return
         }
-        val database = (application as App).database
-        val repository = remember(database) {
-            ActivityRepository(
-                activityDao = database.activityDao(),
-                pendingActions = PendingActionRepository(database)
-            )
-        }
-        val userId by ApiClient.tokens.userIds.collectAsStateWithLifecycle(ApiClient.tokens.userId)
+        val database = dependencies.database
+        val repository = remember { dependencies.activityRepository() }
         MyActivitiesScreen(
             userId = userId,
             enrollmentDao = database.userEnrollmentDao(),
@@ -221,6 +285,29 @@ class MainActivity : ComponentActivity() {
             loadActivity = { repository.getActivityById(it) },
             onOpenAgenda = { agendaOpen = true }
         )
+    }
+
+    /** Shares a fresh Room snapshot only while its account is still signed in. */
+    private suspend fun shareAgenda(accountId: String) {
+        try {
+            val activities = agendaViewModel.activitiesForExport(accountId)
+            if (dependencies.currentUserId() != accountId) return
+            val shareIntent = AgendaCalendarExporter.createShareIntent(this, activities)
+            if (dependencies.currentUserId() != accountId) return
+
+            if (shareIntent == null) {
+                Toast.makeText(this, "No tienes actividades confirmadas para exportar.", Toast.LENGTH_SHORT).show()
+            } else {
+                startActivity(Intent.createChooser(shareIntent, "Exportar calendario"))
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w("MainActivity", "Could not share calendar export", error)
+            if (dependencies.currentUserId() == accountId) {
+                Toast.makeText(this, "No se pudo exportar el calendario.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -239,6 +326,11 @@ class MainActivity : ComponentActivity() {
         if (getIntExtra(TAB_KEY, R.id.nav_home) == R.id.nav_activities) R.id.nav_activities else R.id.nav_home
 
     companion object {
+        /** Installed before the activity starts so navigation tests never change stored credentials. */
+        @VisibleForTesting
+        @Volatile
+        internal var dependenciesForTest: MainActivityDependencies? = null
+
         private const val TAB_KEY = "main_tab"
         private const val AGENDA_KEY = "personal_agenda_open"
 
@@ -252,12 +344,13 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun RecommendationScreen(
-    viewModel: RecommendationsViewModel
+private fun RecommendationScreen(
+    viewModel: RecommendationsViewModel,
+    userId: String?,
+    currentUserId: () -> String?
 ) {
     val context = LocalContext.current
     val isOffline by viewModel.isOffline.collectAsState()
-    val userId = ApiClient.tokens.userId
 
     var selectedCategories by remember {
         mutableStateOf(setOf<String>())
@@ -457,8 +550,8 @@ fun RecommendationScreen(
             item {
                 Button(
                     onClick = {
-                        val currentUserId = ApiClient.tokens.userId
-                        if (currentUserId.isNullOrBlank()) {
+                        val activeUserId = currentUserId()
+                        if (activeUserId.isNullOrBlank()) {
                             errorMessage = "Usuario no autenticado"
                             return@Button
                         }
@@ -467,11 +560,11 @@ fun RecommendationScreen(
                         errorMessage = null
 
                         viewModel.updatePreferences(
-                            userId = currentUserId,
+                            userId = activeUserId,
                             categories = selectedCategories,
                             onSuccess = {
                                 viewModel.loadRecommendedActivities(
-                                    userId = currentUserId,
+                                    userId = activeUserId,
                                     latitude = 4.6382,
                                     longitude = -74.0840,
                                     radiusKm = 10.0,

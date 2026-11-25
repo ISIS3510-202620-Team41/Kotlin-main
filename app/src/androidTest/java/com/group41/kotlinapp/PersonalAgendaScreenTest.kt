@@ -3,6 +3,8 @@ package com.group41.kotlinapp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -27,6 +29,7 @@ import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -44,10 +47,15 @@ class PersonalAgendaScreenTest {
         val date = LocalDate.of(2026, 11, 18)
         val start = date.atTime(9, 30).atZone(ZoneId.systemDefault())
         val title = "Taller de agenda"
-        val enrollment = UserEnrollmentEntity("agenda-user", "workshop", joined = true)
+        val canceledTitle = "Taller cancelado"
+        val enrollment = UserEnrollmentEntity("agenda-user", "workshop", joined = true, enrolledAt = 1L)
+        val canceled = UserEnrollmentEntity(
+            enrollment.userId, "canceled-workshop", joined = false, enrolledAt = 2L, canceledAt = 3L
+        )
         var database = openDatabase()
         val store = ViewModelStore()
         val currentModel = mutableStateOf<AgendaViewModel?>(null)
+        var exportClicks = 0
         fun openAgenda() {
             compose.runOnIdle {
                 val factory = object : ViewModelProvider.Factory {
@@ -68,22 +76,37 @@ class PersonalAgendaScreenTest {
                     ).toEntity()
                 )
                 database.userEnrollmentDao().upsert(enrollment)
+                database.activityDao().insertActivity(
+                    Activity(canceled.activityId, canceledTitle, "Arte", 60, 0).copy(
+                        startTime = start.toOffsetDateTime().toString()
+                    ).toEntity()
+                )
+                database.userEnrollmentDao().upsert(canceled)
             }
             compose.setContent {
                 KotlinAppTheme {
                     currentModel.value?.let { model ->
                         val activities by model.activities.collectAsStateWithLifecycle()
-                        PersonalAgendaScreen(activities, isOnline = false, onBack = {}, initialDate = date.minusDays(1))
+                        PersonalAgendaScreen(
+                            activities,
+                            isOnline = false,
+                            onBack = {},
+                            onExportCalendar = { exportClicks++ },
+                            initialDate = date.minusDays(1)
+                        )
                     }
                 }
             }
             openAgenda()
             compose.waitUntil(5_000) { currentModel.value?.activities?.value?.isNotEmpty() == true }
+            compose.onNodeWithText("Exportar calendario").assertIsEnabled().performClick()
+            compose.runOnIdle { assertEquals(1, exportClicks) }
             assertAgendaText("No tienes actividades para este día.")
             compose.onNode(hasScrollAction()).performScrollToNode(hasText("18"))
             compose.onNodeWithText("18").performClick()
             assertAgendaText("09:30 – 10:30")
             assertAgendaText("Inscripción confirmada")
+            compose.onNodeWithText(canceledTitle).assertDoesNotExist()
 
             runBlocking {
                 database.userEnrollmentDao().upsert(enrollment.copy(joined = false, cancellationPending = true))
@@ -93,6 +116,7 @@ class PersonalAgendaScreenTest {
                     AgendaEnrollmentStatus.PENDING_CANCELLATION
             }
             assertAgendaText("Cancelación pendiente")
+            compose.onNodeWithText("Exportar calendario").assertIsNotEnabled()
 
             // Recreate the ViewModel and Room connection with only the on-disk data available.
             compose.runOnIdle {
@@ -109,6 +133,8 @@ class PersonalAgendaScreenTest {
             compose.onNodeWithText("18").performClick()
             assertAgendaText(title)
             assertAgendaText("Cancelación pendiente")
+            compose.onNodeWithText(canceledTitle).assertDoesNotExist()
+            assertEquals(canceled, runBlocking { database.userEnrollmentDao().get(canceled.userId, canceled.activityId) })
 
             runBlocking {
                 database.userEnrollmentDao().upsert(enrollment.copy(joined = false, canceledAt = 1L))

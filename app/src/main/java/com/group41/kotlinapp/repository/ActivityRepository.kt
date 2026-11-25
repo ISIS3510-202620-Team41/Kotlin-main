@@ -8,6 +8,7 @@ import com.group41.kotlinapp.data.local.toEntity
 import com.group41.kotlinapp.model.Activity
 import com.group41.kotlinapp.model.JoinPayload
 import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.network.EnrollmentAccount
 import com.group41.kotlinapp.network.RecommendationsPage
 import com.group41.kotlinapp.sync.SyncScheduler
 import retrofit2.HttpException
@@ -67,7 +68,8 @@ class ActivityRepository(
      */
     private val pendingActions: PendingActionRepository? = null,
     private val apiProvider: () -> com.group41.kotlinapp.network.ApiService = { ApiClient.api },
-    private val online: () -> Boolean = { ApiClient.isOnline() }
+    private val online: () -> Boolean = { ApiClient.isOnline() },
+    private val currentUserId: () -> String? = { ApiClient.tokens.userId }
 ) {
 
     /**
@@ -143,10 +145,10 @@ class ActivityRepository(
 
     private suspend fun changeEnrollment(payload: JoinPayload, joined: Boolean): JoinResult {
         val queue = pendingActions ?: throw IOException("Cola de inscripciones no disponible")
-        val userId = ApiClient.tokens.userId ?: throw IOException("Inicia sesion para continuar")
+        val userId = currentUserId() ?: throw IOException("Inicia sesion para continuar")
         return queue.changeEnrollment(
             userId, payload, joined, online(), apiProvider,
-            isCurrentUser = { ApiClient.tokens.userId == userId },
+            isCurrentUser = { currentUserId() == userId },
             schedule = { SyncScheduler.schedule(ApiClient.appContext) }
         )
     }
@@ -165,7 +167,7 @@ class ActivityRepository(
         // guardada cuando en realidad se perdio.
         val queue = pendingActions
             ?: throw IOException("No se pudo conectar con el servidor")
-        val userId = ApiClient.tokens.userId
+        val userId = currentUserId()
             ?: throw IOException("No se pudo conectar con el servidor")
 
         queue.enqueueJoin(userId, payload)
@@ -227,7 +229,8 @@ class ActivityRepository(
             val response = apiProvider().recommendations(
                 lat = latitude,
                 lon = longitude,
-                radiusKm = radiusKm
+                radiusKm = radiusKm,
+                account = membershipRead?.account
             )
 
             if (!response.isSuccessful) {
@@ -275,7 +278,8 @@ class ActivityRepository(
             val response = apiProvider().nearbyActivities(
                 lat = latitude,
                 lon = longitude,
-                radiusKm = radiusKm
+                radiusKm = radiusKm,
+                account = membershipRead?.account
             )
 
             if (!response.isSuccessful) {
@@ -316,11 +320,12 @@ class ActivityRepository(
         }
         try {
             val membershipRead = membershipRead()
-            val response = apiProvider().getActivity(activityId, userLat, userLon)
+            val response = apiProvider().getActivity(activityId, userLat, userLon, membershipRead?.account)
             if (response.isSuccessful && response.body() != null) {
                 val jsonObject = JSONObject(response.body().toString())
                 val parsed = parseSingleActivity(jsonObject, userLat = userLat, userLon = userLon)
-                val activity = if (serverOnly) parsed else mergeLocalMembership(parsed, membershipRead)
+                val activity = if (serverOnly) parsed else
+                    mergeLocalMembership(parsed, jsonObject.membership(), membershipRead)
 
                 if (serverOnly && (pendingActions?.supportsEnrollments == true || !activity.joined)) return@withContext activity
                 ActivityMemoryCache.put(activity)
@@ -495,7 +500,7 @@ class ActivityRepository(
      */
     private suspend fun withStoredEnrollment(activity: Activity): Activity {
         val queue = pendingActions?.takeIf { it.supportsEnrollments } ?: return activity
-        val userId = ApiClient.tokens.userId
+        val userId = currentUserId()
         val enrollment = userId?.let { queue.enrollment(it, activity.id) }
         val joined = enrollment?.joined ?: false
         val delta = when {
@@ -513,18 +518,19 @@ class ActivityRepository(
 
     // Capture the account and revision before the request. If either changes while
     // the request is in flight, the response cannot overwrite the newer enrollment.
-    private data class MembershipRead(val userId: String, val revision: Long)
+    private data class MembershipRead(val account: EnrollmentAccount, val revision: Long)
 
     private fun membershipRead(): MembershipRead? {
         if (pendingActions?.supportsEnrollments != true) return null
-        return ApiClient.tokens.userId?.let { MembershipRead(it, ActivityChanges.changes.value) }
+        return currentUserId()?.let { MembershipRead(EnrollmentAccount(it), ActivityChanges.changes.value) }
     }
 
-    private suspend fun mergeLocalMembership(remote: Activity, read: MembershipRead?): Activity {
+    /** Reconciles an explicit membership only while the account and enrollment revision still match. */
+    private suspend fun mergeLocalMembership(remote: Activity, joined: Boolean?, read: MembershipRead?): Activity {
         if (pendingActions?.supportsEnrollments == true) {
-            if (read != null) {
-                pendingActions.rememberMembership(read.userId, remote.id, remote.joined) {
-                    ApiClient.tokens.userId == read.userId && ActivityChanges.changes.value == read.revision
+            if (read != null && joined != null) {
+                pendingActions.rememberMembership(read.account.userId, remote.id, joined) {
+                    currentUserId() == read.account.userId && ActivityChanges.changes.value == read.revision
                 }
             }
             return remote
@@ -581,7 +587,7 @@ class ActivityRepository(
                 userLat = userLat,
                 userLon = userLon
             )
-            activities.add(mergeLocalMembership(activity, membershipRead))
+            activities.add(mergeLocalMembership(activity, activityJson.membership(), membershipRead))
         }
 
         return activities
@@ -599,12 +605,17 @@ class ActivityRepository(
         for (i in 0 until array.length()) {
             val activityJson = array.getJSONObject(i)
             activities.add(mergeLocalMembership(
-                parseSingleActivity(activityJson, userLat = userLat, userLon = userLon), membershipRead
+                parseSingleActivity(activityJson, userLat = userLat, userLon = userLon),
+                activityJson.membership(),
+                membershipRead
             ))
         }
 
         return activities
     }
+
+    // Missing, null, and non-Boolean values carry no membership information.
+    private fun JSONObject.membership(): Boolean? = opt("joined") as? Boolean
 
     private fun parseSingleActivity(
         activityJson: JSONObject,
@@ -664,7 +675,7 @@ class ActivityRepository(
             durationMinutes = durationMinutes,
             distanceMeters = distanceMeters,
             score = score,
-            joined = activityJson.optBoolean("joined", false),
+            joined = activityJson.membership() ?: false,
             recommendationId = recommendationId,
             freeTimeMinutes = freeTimeMinutes,
             price = price,

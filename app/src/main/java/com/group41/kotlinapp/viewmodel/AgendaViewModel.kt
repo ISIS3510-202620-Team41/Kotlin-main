@@ -19,13 +19,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /** Observes the signed-in account's Room enrollments for the offline agenda. */
 internal class AgendaViewModel internal constructor(
     application: Application,
-    enrollmentDao: UserEnrollmentDao,
+    private val enrollmentDao: UserEnrollmentDao,
     accountIds: Flow<String?>
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(
@@ -36,6 +37,10 @@ internal class AgendaViewModel internal constructor(
 
     private val _activities = MutableStateFlow<List<AgendaActivity>>(emptyList())
     val activities: StateFlow<List<AgendaActivity>> = _activities.asStateFlow()
+
+    /** Reads the requested account's current Room rows when the user starts an export. */
+    suspend fun activitiesForExport(userId: String): List<AgendaActivity> =
+        enrollmentDao.observeEnrolledActivities(userId).first().mapNotNull { it.toAgendaActivity() }
 
     init {
         viewModelScope.launch {

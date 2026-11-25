@@ -56,14 +56,16 @@ interface ApiService {
         @Query("lat") lat: Double,
         @Query("lon") lon: Double,
         @Query("radius") radiusKm: Double? = null,
-        @Query("tz") tz: String = TimeZone.getDefault().id
+        @Query("tz") tz: String = TimeZone.getDefault().id,
+        @Tag account: EnrollmentAccount? = null
     ): Response<JsonArray>
 
     @GET("api/activities")
     suspend fun nearbyActivities(
         @Query("lat") lat: Double,
         @Query("lon") lon: Double,
-        @Query("radius") radiusKm: Double
+        @Query("radius") radiusKm: Double,
+        @Tag account: EnrollmentAccount? = null
     ): Response<JsonArray>
 
     @GET("api/activities/{id}")

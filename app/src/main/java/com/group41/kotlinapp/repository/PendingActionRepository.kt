@@ -71,8 +71,11 @@ class PendingActionRepository(
         db.withTransaction {
             if (!enrollmentPending(userId, activityId)) {
                 val enrollments = db.userEnrollmentDao()
-                val previous = enrollments.get(userId, activityId)
-                    ?: UserEnrollmentEntity(userId, activityId, joined = false)
+                val existing = enrollments.get(userId, activityId)
+                // A negative catalog result is not an enrollment and needs no new row.
+                if (existing == null && !joined) return@withTransaction
+                if (!isCurrentRead()) return@withTransaction
+                val previous = existing ?: UserEnrollmentEntity(userId, activityId, joined = false)
                 enrollments.upsert(previous.withConfirmedMembership(joined))
             }
         }
@@ -182,7 +185,9 @@ class PendingActionRepository(
                     if (!isCurrentUser()) throw IOException("La sesion cambio")
                     val detail = api().getActivity(id, account = account)
                     if (!detail.isSuccessful) throw HttpException(detail)
-                    val remoteJoined = detail.body()?.get("joined")?.asBoolean
+                    val remoteJoined = detail.body()?.get("joined")
+                        ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+                        ?.asBoolean
                         ?: throw IOException("El servidor no devolvio el estado de inscripcion")
                     confirmedAfterConflict = remoteJoined
                     if (remoteJoined) null else e

@@ -209,7 +209,8 @@ internal fun PersonalAgendaScreen(
         }
         Button(
             onClick = { onExportCalendar?.invoke() },
-            enabled = onExportCalendar != null,
+            enabled = onExportCalendar != null &&
+                activities.any { it.enrollmentStatus == AgendaEnrollmentStatus.CONFIRMED },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = LlamallaBlue, contentColor = ink)
