@@ -89,3 +89,96 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         db.execSQL("ALTER TABLE user_enrollments ADD COLUMN canceledAt INTEGER")
     }
 }
+
+/**
+ * Version 4 -> 5: agrega las tablas `search_history` y `sync_log`.
+ *
+ * Nota de numeracion: esta migracion se escribio primero como 2 -> 3, pero al integrarla con
+ * la rama principal resulto que ese salto ya estaba ocupado por la tabla de inscripciones
+ * (`user_enrollments`), y el 3 -> 4 por sus marcas de tiempo. Dos migraciones distintas no
+ * pueden compartir numero: Room las aplica por version, asi que una habria tapado a la otra
+ * y la base habria quedado sin una de las dos tablas. Renumerar es la correccion, y no
+ * cambia nada de lo que hace.
+ *
+ * A diferencia de la migracion 1 -> 2, aqui no se toca ninguna tabla existente: solo se
+ * crean dos nuevas. Eso la hace mas simple, pero no la hace innecesaria. Room compara la
+ * forma completa de la base con la que espera el codigo, y una tabla que falta cuenta
+ * igual que una columna que falta: la app no abriria.
+ *
+ * Por que el SQL esta escrito a mano y palabra por palabra:
+ *
+ * Room no ejecuta estas sentencias a ciegas. Despues de migrar, vuelve a leer el esquema
+ * real del archivo y lo compara con el que deduce de las clases con @Entity. Si algo no
+ * coincide (un tipo, un NOT NULL, el nombre de un indice) lanza un error en ese momento.
+ * Por eso cada detalle de aqui esta copiado de lo que Room genera:
+ *
+ * - INTEGER PRIMARY KEY AUTOINCREMENT es lo que corresponde a @PrimaryKey(autoGenerate = true)
+ *   sobre un Long. AUTOINCREMENT hace que SQLite nunca reutilice un id borrado, que es lo
+ *   que se quiere en un historial: dos filas distintas no deben poder compartir id ni
+ *   despues de una limpieza.
+ *
+ * - REAL para los Double y TEXT para los String, porque esos son los tipos que SQLite
+ *   tiene de verdad. SQLite no tiene DOUBLE ni VARCHAR.
+ *
+ * - `httpCode` es la unica columna sin NOT NULL, porque en el codigo es `Int?`. Representa
+ *   algo real: que no hubo respuesta del servidor.
+ *
+ * - `wasOffline` es INTEGER y no BOOLEAN por la misma razon que `pendingSync` en la
+ *   migracion 1 -> 2: SQLite no tiene booleanos y Room guarda 1 y 0.
+ *
+ * - Los indices llevan el nombre `index_<tabla>_<columnas>`, que es el que Room les pone
+ *   por defecto. Con otro nombre, el esquema no coincidiria aunque el indice funcionara.
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+
+        // Historial de busquedas por cercania.
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `search_history` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `userId` TEXT NOT NULL,
+                `latitude` REAL NOT NULL,
+                `longitude` REAL NOT NULL,
+                `radiusKm` REAL NOT NULL,
+                `resultCount` INTEGER NOT NULL,
+                `wasOffline` INTEGER NOT NULL,
+                `searchedAt` INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+
+        // El indice es compuesto y en este orden porque las consultas filtran por usuario
+        // y luego ordenan por fecha. Al reves no serviria: SQLite solo puede usar un
+        // indice compuesto si la consulta empieza por su primera columna.
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_search_history_userId_searchedAt` " +
+                "ON `search_history` (`userId`, `searchedAt`)"
+        )
+
+        // Registro de intentos de sincronizacion.
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `sync_log` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `actionId` TEXT NOT NULL,
+                `userId` TEXT NOT NULL,
+                `actionType` TEXT NOT NULL,
+                `outcome` TEXT NOT NULL,
+                `httpCode` INTEGER,
+                `attemptedAt` INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+
+        // Dos indices separados, y no uno compuesto, porque son dos consultas que no
+        // comparten el primer campo: una busca el historial de una accion concreta y la
+        // otra lista los intentos recientes por fecha.
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_sync_log_actionId` ON `sync_log` (`actionId`)"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_sync_log_attemptedAt` ON `sync_log` (`attemptedAt`)"
+        )
+    }
+}

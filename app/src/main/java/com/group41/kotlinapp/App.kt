@@ -10,7 +10,7 @@ import com.group41.kotlinapp.data.local.MIGRATION_2_3
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.storage.FastKeyValueStore
 import com.group41.kotlinapp.data.local.MIGRATION_3_4
-import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.data.local.MIGRATION_4_5
 import com.group41.kotlinapp.sync.SyncScheduler
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +42,7 @@ class App : Application() {
             // Sin esta linea Room no sabria como pasar de la version 1 a la 2 y cerraria
             // la app al abrirla. Con ella, el usuario que ya tenia la app instalada
             // conserva todo lo que habia descargado.
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
     }
 
