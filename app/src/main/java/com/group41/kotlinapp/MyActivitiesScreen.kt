@@ -46,6 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.group41.kotlinapp.cache.ACTIVITY_THUMBNAIL_SIZE_DP
+import com.group41.kotlinapp.cache.activityThumbnailRequest
+import androidx.compose.ui.platform.LocalContext
 import com.group41.kotlinapp.data.local.dao.EnrolledActivity
 import com.group41.kotlinapp.data.local.dao.UserEnrollmentDao
 import com.group41.kotlinapp.data.local.toActivity
@@ -278,12 +281,16 @@ private fun EnrollmentCard(
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                activity?.imageUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                activity?.imageUrl?.trim()?.takeIf { it.isNotEmpty() }?.let { url ->
+                    val context = LocalContext.current
+                    val request = remember(context, url) { activityThumbnailRequest(context, url).build() }
+                    // Use the same loader and cache keys as the background prefetch.
                     AsyncImage(
-                        model = url,
+                        model = request,
+                        imageLoader = (context.applicationContext as App).activityThumbnailLoader,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
+                        modifier = Modifier.size(ACTIVITY_THUMBNAIL_SIZE_DP.dp).clip(RoundedCornerShape(12.dp))
                             .background(colorResource(R.color.blue_soft))
                     )
                 }

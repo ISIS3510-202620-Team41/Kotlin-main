@@ -4,6 +4,8 @@ import android.app.Application
 import android.util.Log
 import androidx.room.Room
 import com.group41.kotlinapp.analytics.Analytics
+import com.group41.kotlinapp.cache.ActivityThumbnailPrefetcher
+import com.group41.kotlinapp.cache.createActivityThumbnailLoader
 import com.group41.kotlinapp.data.local.AppDatabase
 import com.group41.kotlinapp.data.local.MIGRATION_1_2
 import com.group41.kotlinapp.data.local.MIGRATION_2_3
@@ -19,7 +21,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+/** Owns shared services and startup work that outlive individual activities. */
 class App : Application() {
+
+    /** Shares the thumbnail cache between prefetching and My Activities. */
+    internal val activityThumbnailLoader by lazy { createActivityThumbnailLoader(this) }
+
+    /** Keeps the same three prefetch permits across activity recreation. */
+    internal val activityThumbnailPrefetcher by lazy {
+        ActivityThumbnailPrefetcher(this, activityThumbnailLoader)
+    }
 
     // Startup work belongs to the application, so rotating or closing a screen will
     // not cancel the migration. Disk access runs away from the main thread.
