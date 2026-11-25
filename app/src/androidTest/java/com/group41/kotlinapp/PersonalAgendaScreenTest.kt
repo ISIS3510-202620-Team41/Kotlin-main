@@ -21,6 +21,8 @@ import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.group41.kotlinapp.data.local.AppDatabase
+import com.group41.kotlinapp.cache.AgendaMemoryCache
+import com.group41.kotlinapp.cache.AgendaMemoryCache.Event
 import com.group41.kotlinapp.data.local.entity.UserEnrollmentEntity
 import com.group41.kotlinapp.data.local.toEntity
 import com.group41.kotlinapp.model.Activity
@@ -46,6 +48,28 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PersonalAgendaScreenTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun navigatingBackToAnOfflineMonthReusesItsPreparedActivities() {
+        val initialDate = LocalDate.of(2026, 11, 18)
+        val startsAt = initialDate.atTime(9, 30).atZone(ZoneId.systemDefault())
+        val activities = listOf(
+            AgendaActivity("workshop", "Taller", startsAt, null, AgendaEnrollmentStatus.CONFIRMED)
+        )
+        val events = mutableListOf<Event>()
+        val cache = AgendaMemoryCache { events.add(it) }
+        compose.setContent {
+            KotlinAppTheme {
+                PersonalAgendaScreen(activities, false, {}, initialDate = initialDate, monthCache = cache)
+            }
+        }
+        compose.onNodeWithContentDescription("Mes siguiente").performClick()
+        compose.onNodeWithText("Diciembre de 2026").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Mes anterior").performClick()
+        compose.onNodeWithText("Noviembre de 2026").assertIsDisplayed()
+        assertAgendaText("Taller")
+        compose.runOnIdle { assertEquals(listOf(Event.MISS, Event.MISS, Event.HIT), events) }
+    }
 
     @Test
     fun hidingPendingOfflineRemovesTheirCalendarMarkerAndDailyCards() {

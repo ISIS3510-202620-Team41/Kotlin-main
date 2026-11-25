@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.group41.kotlinapp.AgendaActivity
 import com.group41.kotlinapp.AgendaEnrollmentStatus
 import com.group41.kotlinapp.App
+import com.group41.kotlinapp.BuildConfig
+import com.group41.kotlinapp.cache.AgendaMemoryCache
 import com.group41.kotlinapp.data.local.dao.EnrolledActivity
 import com.group41.kotlinapp.data.local.dao.UserEnrollmentDao
 import com.group41.kotlinapp.network.ApiClient
@@ -61,6 +63,9 @@ internal class AgendaViewModel internal constructor(
 
     private val _uiState = MutableStateFlow(AgendaUiState())
     val uiState: StateFlow<AgendaUiState> = _uiState.asStateFlow()
+    internal val monthCache = AgendaMemoryCache { event ->
+        if (BuildConfig.DEBUG) Log.d("AgendaMemoryCache", event.name)
+    }
 
     fun setShowPending(userId: String, enabled: Boolean) =
         updatePreferences { preferencesStore.setShowPending(userId, enabled) }
@@ -89,11 +94,12 @@ internal class AgendaViewModel internal constructor(
         viewModelScope.launch {
             accountIds.distinctUntilChanged().collectLatest { userId ->
                 // Cancel the previous Room observation and clear its rows before reading the next account.
+                monthCache.invalidate()
                 _uiState.value = AgendaUiState(userId)
                 if (!userId.isNullOrBlank()) {
                     val activities = enrollmentDao.observeEnrolledActivities(userId)
                         .map { rows ->
-                            rows.mapNotNull { it.toAgendaActivity() }.sortedBy { it.startsAt.toInstant() }
+                            rows.mapNotNull { it.toAgendaActivity() }
                         }
                         .catch { error ->
                             Log.e("AgendaViewModel", "Unable to read agenda from Room", error)
@@ -102,7 +108,15 @@ internal class AgendaViewModel internal constructor(
                         .onStart { emit(emptyList()) }
                     preferencesStore.observe(userId).combine(activities) { preferences, rows ->
                         AgendaUiState(userId, preferences, rows)
-                    }.collect { _uiState.value = it }
+                    }.collect { next ->
+                        val previous = _uiState.value
+                        if (previous.activities != next.activities ||
+                            previous.preferences?.showPending != next.preferences?.showPending
+                        ) {
+                            monthCache.invalidate()
+                        }
+                        _uiState.value = next
+                    }
                 }
             }
         }

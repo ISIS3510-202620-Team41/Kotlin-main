@@ -296,6 +296,8 @@ class MainActivity : ComponentActivity() {
         val preferences = state?.preferences
         PersonalAgendaScreen(
             activities = state?.activities.orEmpty(),
+            accountId = userId,
+            monthCache = agendaViewModel.monthCache,
             isOnline = isOnline,
             onBack = { agendaOpen = false },
             initialDate = preferences?.openingDate() ?: LocalDate.now(),

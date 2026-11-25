@@ -1,5 +1,9 @@
 package com.group41.kotlinapp
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -30,14 +34,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -48,6 +55,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.group41.kotlinapp.cache.AgendaMemoryCache
 import com.group41.kotlinapp.storage.AgendaPreferences
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.ui.theme.LlamallaBlue
@@ -107,7 +116,9 @@ internal fun PersonalAgendaScreen(
     preferences: AgendaPreferences? = null,
     onShowPendingChange: (Boolean) -> Unit = {},
     onRememberDateChange: (Boolean, LocalDate) -> Unit = { _, _ -> },
-    onDateSelected: (LocalDate) -> Unit = {}
+    onDateSelected: (LocalDate) -> Unit = {},
+    accountId: String? = null,
+    monthCache: AgendaMemoryCache = remember { AgendaMemoryCache() }
 ) {
     // Start from the account's saved date once. Later DataStore emissions must not undo a newer tap.
     var selectedEpochDay by remember { mutableLongStateOf(initialDate.toEpochDay()) }
@@ -117,18 +128,13 @@ internal fun PersonalAgendaScreen(
     }
     val selectedDate = LocalDate.ofEpochDay(selectedEpochDay)
     val month = YearMonth.from(selectedDate)
-    // Group and display events in the device's time zone so they match the calendar day.
-    val displayZone = ZoneId.systemDefault()
-    // Markers and the daily list share the same filtered activities.
-    val visibleActivities = if (preferences?.showPending == false) {
-        activities.filter { it.enrollmentStatus == AgendaEnrollmentStatus.CONFIRMED }
-    } else {
-        activities
+    val displayZone = rememberAgendaDisplayZone()
+    val showPending = preferences?.showPending != false
+    // Both markers and cards come from the same prepared month. Same-month date taps reuse it.
+    val activitiesByDate = remember(monthCache, month, accountId, activities, showPending, displayZone) {
+        monthCache.getMonth(month, accountId, activities, showPending, displayZone)
     }
-    val activitiesByDate = visibleActivities.groupBy {
-        it.startsAt.withZoneSameInstant(displayZone).toLocalDate()
-    }
-    val dayActivities = activitiesByDate[selectedDate].orEmpty().sortedBy { it.startsAt.toInstant() }
+    val dayActivities = activitiesByDate[selectedDate].orEmpty()
     val ink = colorResource(R.color.text_dark)
 
     Column(
@@ -253,6 +259,26 @@ internal fun PersonalAgendaScreen(
             Text("Exportar calendario")
         }
     }
+}
+
+/** Refreshes the calendar's display zone when Android changes it while the agenda is open. */
+@Composable
+private fun rememberAgendaDisplayZone(): ZoneId {
+    val context = LocalContext.current.applicationContext
+    var zone by remember { mutableStateOf(ZoneId.systemDefault()) }
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                zone = ZoneId.systemDefault()
+            }
+        }
+        ContextCompat.registerReceiver(
+            context, receiver, IntentFilter(Intent.ACTION_TIMEZONE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        zone = ZoneId.systemDefault()
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+    return zone
 }
 
 @Composable
