@@ -1,6 +1,7 @@
 package com.group41.kotlinapp.repository
 
 import com.group41.kotlinapp.cache.ActivityMemoryCache
+import com.group41.kotlinapp.cache.NearbySearchCache
 import com.group41.kotlinapp.data.local.dao.ActivityDao
 import com.group41.kotlinapp.data.local.toActivity
 import com.group41.kotlinapp.data.local.toEntity
@@ -204,6 +205,12 @@ class ActivityRepository(
         )
         ActivityMemoryCache.put(updated)
         activityDao?.insertActivity(updated.toEntity())
+
+        // Invalidacion al escribir: las busquedas por cercania guardadas quedan obsoletas
+        // en el momento en que el usuario se inscribe, porque sus resultados traian esta
+        // actividad como no inscrita. Esperar a que caduquen significaria que volver atras
+        // y buscar otra vez mostraria el estado anterior durante hasta dos minutos.
+        NearbySearchCache.invalidateAll()
     }
 
     /**
@@ -395,6 +402,26 @@ class ActivityRepository(
             (if (!fromDisk.isNullOrEmpty()) fromDisk else ActivityMemoryCache.snapshot()).map { withStoredEnrollment(it) }
         }
 
+        // Paso 1.5: si esta misma busqueda ya se calculo hace poco, se reusa el resultado.
+        //
+        // Lo que se guarda en el cache son los identificadores, no las actividades. Por eso
+        // aqui hay que volver a emparejarlos con los datos recien leidos del disco: asi el
+        // usuario ve el titulo y los participantes actuales, y lo unico que se ahorra es el
+        // calculo de distancias, que es la parte cara.
+        //
+        // Si alguna actividad cacheada ya no esta en el disco (se borro entre las dos
+        // busquedas), el resultado tendria menos elementos de los guardados. En ese caso se
+        // descarta el cache y se recalcula, en vez de mostrar una lista incompleta.
+        NearbySearchCache.get(userLat, userLon, radiusKm)?.let { cachedIds ->
+            val byId = stored.associateBy { it.id }
+            val reusable = cachedIds.mapNotNull { byId[it] }
+            if (reusable.size == cachedIds.size) {
+                // elapsedMillis a 0 porque no se calculo nada. Es la prueba visible del
+                // acierto del cache: la pantalla muestra "0 ms" en la segunda busqueda.
+                return LocalNearbyResult(reusable, elapsedMillis = 0)
+            }
+        }
+
         // Paso 2: filtrar y medir. En el hilo de calculo, porque esto es pura aritmetica.
         return withContext(Dispatchers.Default) {
             val startedAt = System.nanoTime()
@@ -421,6 +448,9 @@ class ActivityRepository(
             // nanoTime y no currentTimeMillis: el primero mide tiempo transcurrido de verdad
             // y no se ve afectado si el reloj del telefono se ajusta a mitad de la medicion.
             val elapsed = (System.nanoTime() - startedAt) / 1_000_000
+
+            // Se guarda el resultado para la proxima vez que pregunten lo mismo.
+            NearbySearchCache.put(userLat, userLon, radiusKm, withinRadius.map { it.id })
 
             LocalNearbyResult(withinRadius, elapsed)
         }

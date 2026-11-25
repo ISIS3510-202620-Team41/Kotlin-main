@@ -6,6 +6,10 @@ import com.group41.kotlinapp.data.local.dao.UserEnrollmentDao
 import com.group41.kotlinapp.data.local.entity.UserEnrollmentEntity
 import com.group41.kotlinapp.data.local.dao.ActivityDao
 import com.group41.kotlinapp.data.local.dao.PreferencesDao
+import com.group41.kotlinapp.data.local.dao.SearchHistoryDao
+import com.group41.kotlinapp.data.local.dao.SyncLogDao
+import com.group41.kotlinapp.data.local.entity.SearchHistoryEntity
+import com.group41.kotlinapp.data.local.entity.SyncLogEntity
 import com.group41.kotlinapp.data.local.entity.ActivityEntity
 import com.group41.kotlinapp.data.local.entity.UserPreferenceEntity
 import com.group41.kotlinapp.data.local.dao.PendingActionDao

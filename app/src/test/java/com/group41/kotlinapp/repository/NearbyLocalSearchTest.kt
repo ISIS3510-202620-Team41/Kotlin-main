@@ -1,6 +1,7 @@
 package com.group41.kotlinapp.repository
 
 import com.group41.kotlinapp.cache.ActivityMemoryCache
+import com.group41.kotlinapp.cache.NearbySearchCache
 import com.group41.kotlinapp.data.local.dao.ActivityDao
 import com.group41.kotlinapp.data.local.entity.ActivityEntity
 import com.group41.kotlinapp.data.local.toEntity
@@ -55,6 +56,13 @@ class NearbyLocalSearchTest {
         // empezar con ella vacia. Si no, los datos de un test se colarian en el siguiente
         // y los fallos dependerian del orden en que se ejecuten.
         ActivityMemoryCache.clear()
+
+        // Lo mismo con la cache de busquedas por cercania, y aqui se nota mas: todos estos
+        // tests buscan desde las mismas coordenadas, asi que sin vaciarla el segundo test
+        // recibiria el resultado que calculo el primero. De hecho fue lo que paso al
+        // conectarla: tres tests empezaron a fallar devolviendo listas de otro test, que es
+        // la prueba de que la cache acierta.
+        NearbySearchCache.invalidateAll()
     }
 
     /** Un repositorio con estas actividades guardadas en disco. */

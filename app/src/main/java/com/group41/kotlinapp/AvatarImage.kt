@@ -12,6 +12,7 @@ import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
 import coil.load
+import coil.request.CachePolicy
 import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import coil.transform.CircleCropTransformation
@@ -168,6 +169,30 @@ fun initialsOf(name: String) = name.trim().split(Regex("\\s+"))
 /**
  * Muestra la foto en círculo sobre las iniciales. Sin foto, o si no carga,
  * quedan visibles las iniciales.
+ *
+ *
+ * LA CACHE DE IMAGENES
+ *
+ * La descarga y el guardado de la foto no se hacen a mano: los hace Coil, la libreria de
+ * imagenes del proyecto. Se eligio Coil y no Glide ni Picasso por tres razones: esta escrita
+ * en Kotlin y usa corrutinas, asi que una carga se cancela sola cuando la pantalla que la
+ * pidio desaparece; pesa bastante menos que Glide; y tiene integracion directa con Compose,
+ * que es lo que usan las pantallas nuevas de la app.
+ *
+ * Coil guarda en dos niveles, configurados al crear el cargador en ApiClient: memoria (un
+ * porcentaje de la RAM disponible) y disco (25 MB en la carpeta de cache). Lo que se decide
+ * aqui, en cada carga, es como se usan esos dos niveles.
+ *
+ * Y hay un detalle que importa mas de lo que parece: lo que Coil guarda en memoria es el
+ * bitmap **ya transformado**, es decir recortado en circulo. Por eso la clave de memoria
+ * incluye la transformacion. Si no fuera asi, cada vez que la pantalla se redibujara habria
+ * que recortar la imagen otra vez, que es trabajo de CPU sobre cada pixel.
+ *
+ * Sobre invalidar: no hace falta. Se verifico en el backend (AvatarStorageService) que cada
+ * foto subida se guarda con un nombre nuevo generado con UUID, asi que la URL cambia en
+ * cada cambio de foto. Una URL nueva es una clave nueva, y la imagen vieja simplemente deja
+ * de consultarse y acaba expulsada por tamaño. Si el backend reusara el mismo nombre, esto
+ * seria un error visible: el usuario cambiaria su foto y seguiria viendo la anterior.
  */
 fun bindAvatar(image: ImageView, initials: TextView, user: UserDto) {
     initials.text = initialsOf(user.name)
@@ -181,6 +206,20 @@ fun bindAvatar(image: ImageView, initials: TextView, user: UserDto) {
     image.load(url) {
         crossfade(true)
         transformations(CircleCropTransformation())
+
+        // Las dos politicas se declaran aunque ENABLED sea el valor por defecto. Es a
+        // proposito: deja escrito en el unico sitio donde se cargan avatares que los dos
+        // niveles se usan, y evita que alguien tenga que ir a leer la configuracion del
+        // cargador en ApiClient para saberlo.
+        memoryCachePolicy(CachePolicy.ENABLED)
+        diskCachePolicy(CachePolicy.ENABLED)
+
+        // Clave de memoria explicita, y estable: la URL del avatar. Sin fijarla, Coil
+        // compone una clave a partir de la peticion entera, que incluye el tamaño de la
+        // vista. Dos pantallas que muestren la misma foto en tamaños distintos guardarian
+        // dos copias de la misma imagen y ninguna aprovecharia el acierto de la otra.
+        memoryCacheKey(url)
+
         listener(onError = { _, _ -> image.visibility = View.GONE })
     }
 }

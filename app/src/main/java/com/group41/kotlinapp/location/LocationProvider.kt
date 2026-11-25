@@ -8,6 +8,7 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.group41.kotlinapp.storage.FastKeyValueStore
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -51,12 +52,59 @@ class LocationProvider(private val context: Context) {
         // cuando otra app pregunto. Es instantanea y casi siempre sirve: para buscar
         // actividades en un radio de kilometros, da igual si el usuario camino media cuadra
         // desde la ultima medicion.
-        lastKnown()?.let { return it }
+        lastKnown()?.let { return remember(it) }
 
         // Si no hay ninguna guardada (telefono recien prendido, o nunca se ha pedido),
         // toca medir de cero.
-        return freshFix()
+        val measured = freshFix()
+        if (measured is LocationResult.Available) return remember(measured)
+
+        // Ni el sistema tenia una posicion guardada ni los sensores pudieron medir. Antes
+        // de rendirse se recurre a la ultima que guardo esta app por su cuenta.
+        //
+        // Este es el caso que lo justifica: el usuario entra al metro o a un sotano, se
+        // queda sin red y sin señal de GPS a la vez. La busqueda por cercania funciona
+        // sin internet, pero no funciona sin saber donde esta el usuario, asi que sin
+        // esta copia se quedaria igual de bloqueada que si no hubiera modo sin conexion.
+        //
+        // La posicion guardada no se hace pasar por una medicion fresca: se devuelve como
+        // [LocationResult.Stale], con su edad, y la pantalla lo avisa.
+        return storedFallback() ?: measured
     }
+
+    /**
+     * Guarda la posicion medida en la base llave/valor y la devuelve tal cual.
+     *
+     * Se guarda en cada medicion buena, aunque nadie la haya pedido para esto. Es
+     * justamente lo que hace que mas tarde, cuando el sensor falle, haya algo que ofrecer.
+     *
+     * Va en MMKV y no en una tabla porque es un solo par de numeros que se reescribe
+     * constantemente, no filas que haya que consultar ni relacionar.
+     */
+    private fun remember(result: LocationResult.Available): LocationResult.Available {
+        FastKeyValueStore.saveLastKnownLocation(result.latitude, result.longitude)
+        return result
+    }
+
+    /**
+     * La ultima posicion que esta app guardo, si todavia sirve de algo.
+     *
+     * El limite de 24 horas no es arbitrario: en un dia una persona puede haber cambiado
+     * de ciudad, y ofrecerle actividades cerca de donde estaba ayer seria peor que no
+     * ofrecerle nada, porque se veria como un error de la app. Por debajo de ese limite
+     * lo normal es que siga en la misma zona, y de todas formas la pantalla le dice de
+     * cuando es la posicion para que el decida.
+     */
+    private fun storedFallback(): LocationResult.Stale? =
+        FastKeyValueStore.lastKnownLocation()
+            ?.takeIf { it.ageMillis <= MAX_STORED_AGE_MILLIS }
+            ?.let { stored ->
+                LocationResult.Stale(
+                    latitude = stored.latitude,
+                    longitude = stored.longitude,
+                    ageMillis = stored.ageMillis
+                )
+            }
 
     /** ¿El usuario nos dejo ver su ubicacion, en cualquiera de los dos niveles? */
     fun hasPermission(): Boolean =
@@ -123,6 +171,11 @@ class LocationProvider(private val context: Context) {
             // salio de la pantalla). Apaga la medicion en curso.
             continuation.invokeOnCancellation { cancellation.cancel() }
         }
+
+    private companion object {
+        /** Mas vieja que esto, la posicion guardada se descarta. */
+        const val MAX_STORED_AGE_MILLIS = 24L * 60 * 60 * 1000
+    }
 }
 
 /**
@@ -144,4 +197,22 @@ sealed interface LocationResult {
 
     /** Hay permiso, pero el telefono no logro medir: ubicacion apagada o sin señal. */
     data object Unavailable : LocationResult
+
+    /**
+     * No se pudo medir ahora, pero la app tenia guardada una posicion anterior y se usa esa.
+     *
+     * Es un caso aparte de [Available] a proposito. Podrian devolverse las coordenadas sin
+     * mas y la busqueda funcionaria igual, pero entonces la pantalla no tendria forma de
+     * saber que son de antes, y le estaria diciendo al usuario "esto esta cerca de ti"
+     * cuando en realidad es "esto estaba cerca de donde estabas".
+     *
+     * Al ser un caso propio del sealed interface, el compilador obliga a cada "when" que
+     * lo consuma a decidir que hacer con el. No se puede ignorar por descuido.
+     */
+    data class Stale(
+        val latitude: Double,
+        val longitude: Double,
+        /** Cuanto tiempo paso desde que se guardo, en milisegundos. */
+        val ageMillis: Long
+    ) : LocationResult
 }
