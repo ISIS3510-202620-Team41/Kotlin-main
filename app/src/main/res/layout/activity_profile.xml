@@ -173,6 +173,25 @@
                     app:strokeColor="@color/white"
                     app:strokeWidth="1.5dp" />
 
+                <!-- Acceso al catalogo de cupones comerciales. -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_deals"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="Cupones"
+                    android:textAllCaps="false"
+                    android:textColor="@color/white"
+                    android:textSize="14sp"
+                    app:backgroundTint="#33FFFFFF"
+                    app:cornerRadius="24dp"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toBottomOf="@id/btn_pending"
+                    app:strokeColor="@color/white"
+                    app:strokeWidth="1.5dp" />
+
                 <LinearLayout
                     android:id="@+id/ll_stats"
                     android:layout_width="0dp"
@@ -180,7 +199,7 @@
                     android:layout_marginTop="20dp"
                     android:orientation="horizontal"
                     android:baselineAligned="false"
-                    app:layout_constraintTop_toBottomOf="@id/btn_pending"
+                    app:layout_constraintTop_toBottomOf="@id/btn_deals"
                     app:layout_constraintStart_toStartOf="parent"
                     app:layout_constraintEnd_toEndOf="parent">
 

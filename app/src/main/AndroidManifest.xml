@@ -50,6 +50,9 @@
             android:name=".PendingActionsActivity"
             android:exported="false" />
         <activity
+            android:name=".CampusDealsActivity"
+            android:exported="false" />
+        <activity
             android:name=".SettingsActivity"
             android:exported="false" />
         <activity

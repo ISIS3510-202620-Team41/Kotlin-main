@@ -140,6 +140,24 @@ object FastKeyValueStore {
     }
 
     /**
+     * Guarda un texto. Se usa para documentos JSON pequenos, como los huecos del dia.
+     *
+     * MMKV encaja por lo de siempre: el documento se reescribe entero cada vez que se
+     * refresca, y con SharedPreferences eso significaria regenerar su XML completo.
+     */
+    fun putString(key: String, value: String) {
+        store?.encode(key, value)
+    }
+
+    /** El texto guardado, o null si no hay ninguno con esa clave. */
+    fun getString(key: String): String? = store?.decodeString(key)
+
+    /** Borra una sola clave. */
+    fun remove(key: String) {
+        store?.removeValueForKey(key)
+    }
+
+    /**
      * Cuanto ocupa el archivo en disco, en bytes.
      *
      * MMKV reserva espacio por paginas, asi que este numero es el tamaño del archivo,
