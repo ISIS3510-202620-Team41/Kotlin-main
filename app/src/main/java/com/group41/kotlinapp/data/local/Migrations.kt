@@ -182,3 +182,59 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         )
     }
 }
+
+/**
+ * Version 5 -> 6: agrega la tabla `deals`, el catalogo de cupones comerciales.
+ *
+ * Es la persistencia offline del issue #44, y tiene un motivo concreto que no es solo
+ * "que se vea sin internet": un cupon se usa de pie en la caja de un local, con el
+ * telefono en la mano y a menudo sin senal dentro del edificio. Es justo el momento en
+ * que la red falla y justo el momento en que el dato tiene que estar.
+ *
+ * Detalles del SQL, por lo de siempre: Room vuelve a leer el esquema real despues de
+ * migrar y lo compara con el que deduce de las clases con @Entity, asi que cada tipo y
+ * cada NOT NULL tienen que coincidir exactamente.
+ *
+ * - `id` es TEXT y clave primaria, no autogenerado: el cupon nace en el backend y el
+ *   telefono guarda una copia. Con un id autogenerado, cada descarga crearia filas nuevas
+ *   en lugar de actualizar las que ya estan.
+ *
+ * - `redeemed` y `pendingSync` son INTEGER porque SQLite no tiene booleanos, igual que
+ *   `pendingSync` en `activities`. Llevan DEFAULT 0, que es lo correcto para un cupon
+ *   recien descargado: ni redimido, ni pendiente de nada.
+ *
+ * - `minutesNeeded` es NOT NULL aunque sea una estimacion. Es el campo que cruza con el
+ *   tiempo libre del estudiante para la BQ-11, y un nulo ahi dejaria ese cupon fuera de
+ *   la comparacion sin que nadie lo note.
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `deals` (
+                `id` TEXT NOT NULL,
+                `merchant` TEXT NOT NULL,
+                `title` TEXT NOT NULL,
+                `description` TEXT,
+                `discountPercent` INTEGER NOT NULL,
+                `category` TEXT NOT NULL,
+                `minutesNeeded` INTEGER NOT NULL,
+                `validUntil` TEXT,
+                `redemptionCode` TEXT,
+                `imageUrl` TEXT,
+                `redeemed` INTEGER NOT NULL DEFAULT 0,
+                `pendingSync` INTEGER NOT NULL DEFAULT 0,
+                `cachedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent()
+        )
+
+        // Dos indices separados porque son dos filtros independientes: el usuario filtra
+        // por categoria desde la pantalla, y toda consulta esconde los vencidos. Uno
+        // compuesto solo serviria si siempre se filtrara por las dos a la vez.
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_deals_category` ON `deals` (`category`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_deals_validUntil` ON `deals` (`validUntil`)")
+    }
+}

@@ -133,6 +133,10 @@ class ProfileActivity : AppCompatActivity() {
             startActivity(Intent(this, PendingActionsActivity::class.java))
         }
 
+        findViewById<View>(R.id.btn_deals).setOnClickListener {
+            startActivity(Intent(this, CampusDealsActivity::class.java))
+        }
+
         findViewById<View>(R.id.btn_settings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
