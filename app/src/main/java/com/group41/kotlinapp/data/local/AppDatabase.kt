@@ -5,6 +5,8 @@ import androidx.room.RoomDatabase
 import com.group41.kotlinapp.data.local.dao.UserEnrollmentDao
 import com.group41.kotlinapp.data.local.entity.UserEnrollmentEntity
 import com.group41.kotlinapp.data.local.dao.ActivityDao
+import com.group41.kotlinapp.data.local.dao.DealDao
+import com.group41.kotlinapp.data.local.entity.DealEntity
 import com.group41.kotlinapp.data.local.dao.SearchHistoryDao
 import com.group41.kotlinapp.data.local.dao.SyncLogDao
 import com.group41.kotlinapp.data.local.entity.SearchHistoryEntity
@@ -26,7 +28,8 @@ import com.group41.kotlinapp.data.local.entity.PendingActionEntity
         PendingActionEntity::class,
         UserEnrollmentEntity::class,
         SearchHistoryEntity::class,
-        SyncLogEntity::class
+        SyncLogEntity::class,
+        DealEntity::class
     ],
     // La version sube cada vez que cambia la forma de alguna tabla, y por cada salto tiene
     // que existir una migracion en Migrations.kt, o la app se cerrara al abrirse en un
@@ -35,7 +38,10 @@ import com.group41.kotlinapp.data.local.entity.PendingActionEntity
     // Pasa a 5 porque se agregaron dos tablas nuevas: `search_history`, el historial de
     // busquedas por cercania, y `sync_log`, el registro de intentos de sincronizacion.
     // Agregar una tabla cambia la forma de la base igual que agregar una columna.
-    version = 5,
+    //
+    // Pasa a 6 porque se agrego `deals`, el catalogo de cupones comerciales que la
+    // pantalla de CampusDeals necesita tener guardado para funcionar sin conexion.
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -79,4 +85,7 @@ abstract class AppDatabase : RoomDatabase() {
      * Expone las consultas del registro de intentos de sincronizacion.
      */
     abstract fun syncLogDao(): SyncLogDao
+
+    /** Expone las consultas del catalogo de cupones comerciales. */
+    abstract fun dealDao(): DealDao
 }

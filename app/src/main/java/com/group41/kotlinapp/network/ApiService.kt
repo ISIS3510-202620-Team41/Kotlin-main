@@ -120,6 +120,35 @@ interface ApiService {
         @Query("date") date: String,
         @Query("tz") tz: String = TimeZone.getDefault().id
     ): GapsResponse
+
+    // ----- Cupones comerciales (CampusDeals) -----
+
+    /**
+     * El catalogo vigente.
+     *
+     * El backend responde con `Cache-Control: public, max-age=300`, que es lo que permite
+     * que OkHttp guarde la respuesta en su cache de disco y la sirva sin red.
+     */
+    @GET("api/deals")
+    suspend fun deals(): List<DealDto>
+
+    /** Reporta en lote que unos cupones se mostraron o se abrieron. */
+    @POST("api/deals/interactions")
+    suspend fun reportDealInteractions(@Body body: DealInteractionBatch): Int
+
+    /**
+     * Redime un cupon.
+     *
+     * El contexto del descanso viaja en el cuerpo porque solo el telefono sabe si el
+     * estudiante estaba en un hueco en el momento de redimir. Para una redencion hecha
+     * sin conexion y enviada horas despues, calcularlo en el servidor con la hora de
+     * llegada registraria el descanso equivocado.
+     */
+    @POST("api/deals/{id}/redeem")
+    suspend fun redeemDeal(
+        @Path("id") dealId: String,
+        @Body context: DealInteractionDto
+    ): RedemptionDto
 }
 
 /** A recommendation payload with the ID assigned by the backend. */
