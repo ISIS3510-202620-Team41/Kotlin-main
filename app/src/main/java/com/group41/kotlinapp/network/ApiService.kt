@@ -126,8 +126,25 @@ interface ApiService {
     /**
      * El catalogo vigente.
      *
-     * El backend responde con `Cache-Control: public, max-age=300`, que es lo que permite
-     * que OkHttp guarde la respuesta en su cache de disco y la sirva sin red.
+     * LA MITAD HTTP DEL CACHE DE CUPONES
+     *
+     * Quien decide que esta respuesta se puede guardar es el SERVIDOR, no el telefono:
+     * `DealController` la devuelve con `Cache-Control: public, max-age=300`. OkHttp lee
+     * ese header y guarda el cuerpo en su cache de disco de 10 MB.
+     *
+     * Que el cliente ponga el mismo header en la respuesta no serviria para esto, y
+     * conviene saberlo: el `Cache` de OkHttp vive mas adentro de la cadena que los
+     * interceptores de aplicacion, asi que lo que se guarda es la respuesta tal como
+     * llego de la red, antes de que un interceptor de aplicacion la reescriba. Lo que SI
+     * funciona desde esa capa es reescribir la PETICION, que es como se pide la copia
+     * guardada cuando no hay conexion (`only-if-cached`).
+     *
+     * A diferencia de `/api/activities`, este catalogo no se fuerza a `no-cache` estando
+     * en linea, asi que los cinco minutos se aprovechan de verdad. Ver la excepcion
+     * documentada en `ApiClient`.
+     *
+     * Son dos caches encima del otro y cada uno cubre algo distinto: este, de disco,
+     * ahorra la peticion de red; `DealsMemoryCache` ahorra incluso la lectura de disco.
      */
     @GET("api/deals")
     suspend fun deals(): List<DealDto>
