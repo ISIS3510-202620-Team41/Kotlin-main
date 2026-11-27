@@ -37,6 +37,10 @@
             android:windowSoftInputMode="adjustResize">
         </activity>
         <activity
+            android:name=".FriendScheduleMatrixActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".ProfileActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />

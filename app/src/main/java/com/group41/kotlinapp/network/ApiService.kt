@@ -121,6 +121,15 @@ interface ApiService {
         @Query("tz") tz: String = TimeZone.getDefault().id
     ): GapsResponse
 
+    @GET("api/friends")
+    suspend fun listFriends(): List<UserDto>
+
+    @GET("api/friends/schedules")
+    suspend fun friendSchedules(
+        @Query("date") date: String,
+        @Query("tz") tz: String = TimeZone.getDefault().id
+    ): List<FriendScheduleDto>
+
     // ----- Cupones comerciales (CampusDeals) -----
 
     /**
