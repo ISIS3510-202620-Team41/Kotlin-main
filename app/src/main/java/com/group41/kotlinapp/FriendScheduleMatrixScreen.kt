@@ -61,6 +61,9 @@ import com.group41.kotlinapp.ui.theme.LlamallaBlue
 import com.group41.kotlinapp.ui.theme.LlamallaRose
 import com.group41.kotlinapp.viewmodel.FriendScheduleUiState
 import com.group41.kotlinapp.viewmodel.FriendScheduleViewModel
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,6 +113,21 @@ fun FriendScheduleMatrixScreen(
                     }
                 },
                 actions = {
+                    if (state.isOffline) {
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .background(Color(0xFFFFF3CD), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "Modo Offline",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF856404)
+                            )
+                        }
+                    }
                     IconButton(onClick = { viewModel.loadData(state.selectedDate) }) {
                         Text(
                             text = "🔄",
@@ -128,9 +146,29 @@ fun FriendScheduleMatrixScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // 0. Banner de modo offline (Conectividad eventual)
+            if (state.isOffline) {
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFFFF3CD), RoundedCornerShape(10.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "Modo sin conexión: mostrando horarios cacheados localmente y recalculando huecos en tu dispositivo.",
+                            fontSize = 12.sp,
+                            color = Color(0xFF856404),
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
             // 1. Selector de fecha
             item {
-                Spacer(modifier = Modifier.height(4.dp))
+                if (!state.isOffline) Spacer(modifier = Modifier.height(4.dp))
                 DateSelectionRow(
                     selectedDate = state.selectedDate,
                     onDateSelected = { viewModel.setDate(it) }
@@ -293,7 +331,20 @@ fun DateSelectionRow(
     selectedDate: String,
     onDateSelected: (String) -> Unit
 ) {
-    val today = remember { FriendScheduleViewModel.currentDateFormatted() }
+    val dateOptions = remember {
+        val isoFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val labelFormatter = SimpleDateFormat("dd MMM", Locale.getDefault())
+        (0..2).map { offset ->
+            val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, offset) }
+            val iso = isoFormatter.format(cal.time)
+            val label = when (offset) {
+                0 -> "Hoy"
+                1 -> "Mañana"
+                else -> labelFormatter.format(cal.time)
+            }
+            iso to label
+        }
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -308,15 +359,17 @@ fun DateSelectionRow(
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium
         )
-        FilterChip(
-            selected = selectedDate == today,
-            onClick = { onDateSelected(today) },
-            label = { Text("Hoy") },
-            colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = LlamallaBlue,
-                selectedLabelColor = LlamallaBlack
+        dateOptions.forEach { (dateIso, label) ->
+            FilterChip(
+                selected = selectedDate == dateIso,
+                onClick = { onDateSelected(dateIso) },
+                label = { Text(label) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = LlamallaBlue,
+                    selectedLabelColor = LlamallaBlack
+                )
             )
-        )
+        }
     }
 }
 

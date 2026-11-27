@@ -43,8 +43,10 @@ class FriendScheduleViewModel(
     private val _uiState = MutableStateFlow(FriendScheduleUiState())
     val uiState: StateFlow<FriendScheduleUiState> = _uiState.asStateFlow()
 
+    private var hasTrackedMatrixView = false
+
     private var myUser: UserDto = UserDto(
-        id = ApiClient.tokens.userId ?: "current-user",
+        id = runCatching { ApiClient.tokens.userId }.getOrNull() ?: "current-user",
         email = "",
         name = "Yo",
         bio = null,
@@ -90,7 +92,8 @@ class FriendScheduleViewModel(
     }
 
     fun loadData(date: String) {
-        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        val online = runCatching { ApiClient.isOnline() }.getOrDefault(false)
+        _uiState.update { it.copy(isLoading = true, isOffline = !online, errorMessage = null) }
         viewModelScope.launch {
             try {
                 // Consultas concurrentes de mis huecos y los horarios de mis amigos
@@ -113,9 +116,20 @@ class FriendScheduleViewModel(
                     )
                 }
 
+                if (!hasTrackedMatrixView) {
+                    hasTrackedMatrixView = true
+                    runCatching {
+                        Analytics.track(
+                            "friend_availability_used",
+                            mapOf("action" to "matrix_viewed")
+                        )
+                    }
+                }
+
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        isOffline = !online,
                         friends = friendItems
                     )
                 }
@@ -124,6 +138,7 @@ class FriendScheduleViewModel(
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        isOffline = !online,
                         errorMessage = "No se pudieron actualizar los horarios (usando datos locales)"
                     )
                 }
@@ -146,11 +161,16 @@ class FriendScheduleViewModel(
 
     fun onPlanFromGapClicked(gap: SharedGap) {
         // Emisión de evento para BQ-13 (Analytics Engine)
-        Analytics.track("friend_availability_used", mapOf(
-            "action" to "create_plan",
-            "participants" to gap.totalParticipants,
-            "duration" to gap.durationMinutes
-        ))
+        runCatching {
+            Analytics.track(
+                "friend_availability_used",
+                mapOf(
+                    "action" to "create_plan",
+                    "participants" to gap.totalParticipants,
+                    "duration" to gap.durationMinutes
+                )
+            )
+        }
     }
 
     companion object {
