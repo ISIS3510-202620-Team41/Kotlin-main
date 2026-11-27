@@ -37,6 +37,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.group41.kotlinapp.analytics.Analytics
 import com.group41.kotlinapp.analytics.BreakState
 import com.group41.kotlinapp.data.local.entity.DealEntity
+import com.group41.kotlinapp.repository.CatalogSource
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.viewmodel.DealsUiState
 import com.group41.kotlinapp.viewmodel.DealsViewModel
@@ -119,6 +120,21 @@ private fun CampusDealsScreen(
                 text = "Sin conexion: catalogo guardado en tu telefono.",
                 color = Color(0xFFB26A00),
                 fontSize = 13.sp
+            )
+        }
+
+        // El origen y el tiempo se muestran a proposito: son la prueba visible de que el
+        // cache en memoria sirve. La primera carga dice "disco" y unos milisegundos, la
+        // segunda dice "memoria" y cero. Es la medicion del antes y el despues, en vivo.
+        state.catalogSource?.let { source ->
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = when (source) {
+                    CatalogSource.MEMORY -> "Desde memoria (${state.catalogElapsedMillis} ms)"
+                    CatalogSource.DISK -> "Desde la base local (${state.catalogElapsedMillis} ms)"
+                },
+                fontSize = 12.sp,
+                color = Color.Gray
             )
         }
 

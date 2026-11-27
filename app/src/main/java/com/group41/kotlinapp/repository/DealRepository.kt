@@ -1,6 +1,7 @@
 package com.group41.kotlinapp.repository
 
 import android.util.Log
+import com.group41.kotlinapp.cache.DealsMemoryCache
 import com.group41.kotlinapp.data.local.dao.DealDao
 import com.group41.kotlinapp.data.local.entity.DealEntity
 import com.group41.kotlinapp.network.ApiClient
@@ -11,6 +12,7 @@ import com.group41.kotlinapp.network.DealInteractionDto
 import com.group41.kotlinapp.network.RedemptionDto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -62,6 +64,45 @@ class DealRepository(
     fun redeemed(): Flow<List<DealEntity>> = dealDao.redeemedDeals()
 
     /**
+     * El catalogo para mostrarlo una vez, pasando por los tres niveles.
+     *
+     * LOS TRES NIVELES Y POR QUE EXISTEN
+     *
+     * 1. **Memoria** ([DealsMemoryCache]): microsegundos. Es donde cae la mayoria de las
+     *    consultas, porque el usuario entra y sale de la pantalla varias veces por sesion.
+     * 2. **Room**: milisegundos. Sobrevive al cierre de la app, asi que es lo que hace que
+     *    el catalogo este ahi al abrirla sin internet.
+     * 3. **Red**: cientos de milisegundos, y solo si hay conexion. La hace [refresh].
+     *
+     * Cada nivel existe porque el siguiente es ordenes de magnitud mas lento. Sin el
+     * primero, volver a la lista despues de mirar un cupon releeria el disco entero; sin
+     * el segundo, la app no serviria de nada sin senal.
+     *
+     * Se mide y se devuelve cuanto tardo. No es decoracion: es lo que permite demostrar
+     * que el cache sirve, con un numero en vez de con una suposicion.
+     */
+    suspend fun catalogSnapshot(): CatalogSnapshot = withContext(Dispatchers.IO) {
+        val startedAt = System.nanoTime()
+
+        DealsMemoryCache.get()?.let { cached ->
+            return@withContext CatalogSnapshot(
+                deals = cached,
+                source = CatalogSource.MEMORY,
+                elapsedMillis = elapsedSince(startedAt)
+            )
+        }
+
+        val fromDisk = dealDao.activeDeals(nowIso()).first()
+        DealsMemoryCache.put(deals = fromDisk)
+
+        CatalogSnapshot(
+            deals = fromDisk,
+            source = CatalogSource.DISK,
+            elapsedMillis = elapsedSince(startedAt)
+        )
+    }
+
+    /**
      * Baja el catalogo del servidor y lo guarda.
      *
      * No lanza: si no hay red o el endpoint todavia no existe, se queda con lo que ya
@@ -80,6 +121,11 @@ class DealRepository(
             // Se limpian los vencidos despues de guardar, no antes: si la peticion
             // fallara a mitad, no tiene sentido haber borrado ya lo que habia.
             dealDao.deleteExpired(nowIso())
+
+            // El catalogo en memoria quedo obsoleto en cuanto se escribio el nuevo. Se
+            // tira ahora y no se espera a que caduque: si no, la pantalla seguiria
+            // mostrando el catalogo viejo hasta diez minutos despues de refrescarlo.
+            DealsMemoryCache.invalidateAll()
             true
         } catch (error: Exception) {
             logWarning("No se pudo refrescar el catalogo de cupones", error)
@@ -98,6 +144,7 @@ class DealRepository(
     suspend fun seedIfEmpty(): Unit = withContext(Dispatchers.IO) {
         if (dealDao.count() > 0) return@withContext
         dealDao.upsertAll(sampleCatalog(now()))
+        DealsMemoryCache.invalidateAll()
     }
 
     /**
@@ -127,18 +174,21 @@ class DealRepository(
             // la bandera de pendiente. El usuario ve la respuesta al instante y la
             // pantalla es honesta sobre que falta confirmarlo.
             dealDao.markRedeemed(dealId, pendingSync = true, code = null)
+            DealsMemoryCache.invalidateAll()
             return@withContext RedeemResult.Queued
         }
 
         try {
             val response: RedemptionDto = apiProvider().redeemDeal(dealId, context)
             dealDao.markRedeemed(dealId, pendingSync = false, code = response.redemptionCode)
+            DealsMemoryCache.invalidateAll()
             RedeemResult.Synced(response.redemptionCode)
         } catch (error: Exception) {
             // La red se cayo a mitad. Se encola igual, porque la intencion del usuario no
             // se puede perder por un fallo de transporte.
             logWarning("No se pudo redimir en linea, queda pendiente", error)
             dealDao.markRedeemed(dealId, pendingSync = true, code = null)
+            DealsMemoryCache.invalidateAll()
             RedeemResult.Queued
         }
     }
@@ -161,6 +211,15 @@ class DealRepository(
         }
     }
 
+    /**
+     * Cuanto ha pasado, en milisegundos.
+     *
+     * nanoTime y no currentTimeMillis: el primero mide tiempo transcurrido de verdad y no
+     * se ve afectado si el reloj del telefono se ajusta a mitad de la medicion.
+     */
+    private fun elapsedSince(startedAtNanos: Long): Long =
+        (System.nanoTime() - startedAtNanos) / 1_000_000
+
     /** La hora actual en ISO 8601, que es el formato con el que se comparan las fechas. */
     private fun nowIso(): String =
         OffsetDateTime.now().format(ISO_FORMATTER)
@@ -170,6 +229,27 @@ class DealRepository(
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
     }
 }
+
+/**
+ * De donde salio el catalogo que se esta mostrando.
+ *
+ * Se distingue para poder demostrar que el cache funciona: la primera carga dice DISK, la
+ * segunda dice MEMORY. Sin esta marca habria que creerselo.
+ */
+enum class CatalogSource {
+    /** Estaba en memoria. Microsegundos. */
+    MEMORY,
+
+    /** Hubo que leer la base de datos. Milisegundos. */
+    DISK
+}
+
+/** El catalogo, de donde salio y cuanto costo traerlo. */
+data class CatalogSnapshot(
+    val deals: List<DealEntity>,
+    val source: CatalogSource,
+    val elapsedMillis: Long
+)
 
 /**
  * Como termino una redencion.

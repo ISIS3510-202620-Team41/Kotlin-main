@@ -9,6 +9,7 @@ import com.group41.kotlinapp.analytics.BreakState
 import com.group41.kotlinapp.data.local.entity.DealEntity
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.network.DealInteractionDto
+import com.group41.kotlinapp.repository.CatalogSource
 import com.group41.kotlinapp.repository.DealRepository
 import com.group41.kotlinapp.repository.FreeSlotsRepository
 import com.group41.kotlinapp.repository.RedeemResult
@@ -43,6 +44,16 @@ data class DealsUiState(
 
     /** El catalogo salio del telefono, sin preguntarle al servidor. */
     val fromLocalData: Boolean = false,
+
+    /**
+     * De donde salio el catalogo y cuanto tardo en llegar.
+     *
+     * Se muestra en pantalla a proposito: es la prueba visible de que el cache en memoria
+     * sirve. La primera carga dice "disco" y unos milisegundos; la segunda dice "memoria"
+     * y cero.
+     */
+    val catalogSource: CatalogSource? = null,
+    val catalogElapsedMillis: Long? = null,
 
     val message: String? = null
 )
@@ -104,19 +115,20 @@ class DealsViewModel(application: Application) : AndroidViewModel(application) {
                 // Se refresca desde el servidor si hay red. Devuelve si lo consiguio, que
                 // es lo que permite avisar en pantalla de que los datos son del telefono.
                 val refreshed = dealRepository.refresh()
-                refreshed to dealRepository.catalog().first()
+                // Y se lee por los tres niveles: memoria, y si no esta, la base local.
+                refreshed to dealRepository.catalogSnapshot()
             }
 
             val breakJob = async(Dispatchers.IO) {
                 freeSlots.currentBreakState()
             }
 
-            val (refreshed, catalog) = catalogJob.await()
+            val (refreshed, snapshot) = catalogJob.await()
             val breakState = breakJob.await()
 
             // --- El cruce entre las dos, en el hilo de calculo ---
             val ordered = withContext(Dispatchers.Default) {
-                orderForBreak(catalog, breakState)
+                orderForBreak(snapshot.deals, breakState)
             }
 
             val categories = withContext(Dispatchers.IO) {
@@ -132,7 +144,9 @@ class DealsViewModel(application: Application) : AndroidViewModel(application) {
                     deals = applyFilter(ordered, it.selectedCategory),
                     categories = categories,
                     breakState = breakState,
-                    fromLocalData = !refreshed
+                    fromLocalData = !refreshed,
+                    catalogSource = snapshot.source,
+                    catalogElapsedMillis = snapshot.elapsedMillis
                 )
             }
 
@@ -203,7 +217,7 @@ class DealsViewModel(application: Application) : AndroidViewModel(application) {
                 ) + breakState.toAnalyticsFields()
             )
 
-            fullCatalog = orderForBreak(dealRepository.catalog().first(), breakState)
+            fullCatalog = orderForBreak(dealRepository.catalogSnapshot().deals, breakState)
 
             _state.update {
                 it.copy(

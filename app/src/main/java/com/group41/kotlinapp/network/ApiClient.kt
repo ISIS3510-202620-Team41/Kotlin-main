@@ -65,6 +65,14 @@ object ApiClient {
             }
 
             // Activity membership and counts must be revalidated on every online read.
+            //
+            // Esta excepcion es solo para /api/activities, y por eso el catalogo de
+            // cupones (/api/deals) SI se sirve desde el cache de disco durante cinco
+            // minutos cuando hay conexion. La diferencia es la naturaleza del dato: la
+            // inscripcion a una actividad y su numero de participantes cambian cuando
+            // otro usuario actua, asi que servir una copia de hace cinco minutos
+            // mostraria plazas que ya no existen. Un cupon solo cambia cuando el comercio
+            // renegocia el convenio.
             if (request.method == "GET" && request.url.encodedPath.startsWith("/api/activities") && isOnline(appContext)) {
                 request = request.newBuilder().header("Cache-Control", "no-cache").build()
             }
