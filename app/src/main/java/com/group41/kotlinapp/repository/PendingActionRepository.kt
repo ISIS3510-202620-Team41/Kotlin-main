@@ -1,6 +1,12 @@
 package com.group41.kotlinapp.repository
 
+import androidx.room.withTransaction
 import com.google.gson.Gson
+import com.group41.kotlinapp.data.local.AppDatabase
+import com.group41.kotlinapp.data.local.entity.UserEnrollmentEntity
+import com.group41.kotlinapp.model.CancelEnrollmentPayload
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.group41.kotlinapp.data.local.dao.PendingActionDao
 import com.group41.kotlinapp.data.local.entity.PendingActionEntity
 import com.group41.kotlinapp.model.JoinPayload
@@ -9,6 +15,7 @@ import com.group41.kotlinapp.model.PendingActionType
 import com.group41.kotlinapp.network.ApiClient
 import com.group41.kotlinapp.network.ApiService
 import com.group41.kotlinapp.network.CreateActivityRequest
+import com.group41.kotlinapp.network.EnrollmentAccount
 import java.util.UUID
 import java.io.File
 import java.io.IOException
@@ -32,8 +39,212 @@ import org.json.JSONObject
 class PendingActionRepository(
     private val pendingActionDao: PendingActionDao,
     private val apiServiceProvider: () -> ApiService = { ApiClient.api },
-    private val gson: Gson = Gson()
+    private val gson: Gson = Gson(),
+    private val database: AppDatabase? = null
 ) {
+
+    // The Room constructor lets us update the enrollment and queue in one transaction.
+    // The DAO-only constructor still supports activity creation and photo uploads.
+    constructor(database: AppDatabase, apiServiceProvider: () -> ApiService = { ApiClient.api }) :
+        this(database.pendingActionDao(), apiServiceProvider, database = database)
+
+    val supportsEnrollments: Boolean get() = database != null
+
+    suspend fun enrollment(userId: String, activityId: String): UserEnrollmentEntity? =
+        database?.userEnrollmentDao()?.get(userId, activityId)
+
+    suspend fun enrollmentPending(userId: String, activityId: String): Boolean =
+        requireNotNull(database).userEnrollmentDao().hasPendingAction(
+            userId, joinActionId(userId, activityId), cancellationActionId(userId, activityId)
+        )
+
+    // Save the server state only if the read is current and no local change is pending.
+    // A delayed response could otherwise restore an enrollment the user just cancelled.
+    suspend fun rememberMembership(
+        userId: String,
+        activityId: String,
+        joined: Boolean,
+        isCurrentRead: () -> Boolean
+    ) = enrollmentMutex.withLock {
+        if (!isCurrentRead()) return@withLock
+        val db = requireNotNull(database)
+        db.withTransaction {
+            if (!enrollmentPending(userId, activityId)) {
+                val enrollments = db.userEnrollmentDao()
+                val existing = enrollments.get(userId, activityId)
+                // A negative catalog result is not an enrollment and needs no new row.
+                if (existing == null && !joined) return@withTransaction
+                if (!isCurrentRead()) return@withTransaction
+                val previous = existing ?: UserEnrollmentEntity(userId, activityId, joined = false)
+                enrollments.upsert(previous.withConfirmedMembership(joined))
+            }
+        }
+    }
+
+    // The screen and WorkManager share this lock so the previous attempt commits
+    // its result before another enrollment change is processed.
+    suspend fun changeEnrollment(
+        userId: String,
+        payload: JoinPayload,
+        joined: Boolean,
+        online: Boolean,
+        api: () -> ApiService,
+        isCurrentUser: () -> Boolean,
+        schedule: () -> Unit
+    ): JoinResult = enrollmentMutex.withLock {
+        check(isCurrentUser()) { "La sesion cambio" }
+        val db = requireNotNull(database)
+        val id = payload.activityId
+        val type = if (joined) PendingActionType.JOIN_ACTIVITY else PendingActionType.CANCEL_ENROLLMENT
+        val actionId = if (joined) joinActionId(userId, id) else cancellationActionId(userId, id)
+        val oppositeId = if (joined) cancellationActionId(userId, id) else joinActionId(userId, id)
+        val body = if (joined) payload.toJson() else CancelEnrollmentPayload(id).toJson()
+        // Save the state shown to the user and the action to send in one transaction.
+        // Both can then be restored together after an app restart.
+        val action = withContext(NonCancellable) {
+            db.withTransaction {
+                val enrollments = db.userEnrollmentDao()
+                val existing = enrollments.get(userId, id)
+                    ?: UserEnrollmentEntity(userId, id, joined = false)
+                // An opposing action replaces the previous request. Repeated requests
+                // for the same change keep one row through insertIfAbsent.
+                dao.deleteAction(oppositeId, userId)
+                dao.insertIfAbsent(PendingActionEntity(
+                    actionId, userId, type.name, body.toString(), System.currentTimeMillis(), 0
+                ))
+                enrollments.upsert(existing.copy(joined = joined, cancellationPending = !joined))
+                checkNotNull(dao.getPendingActions(userId).first { it.id == actionId }.toDomainOrNull())
+            }.also {
+                // Schedule background sync in case the immediate attempt is interrupted.
+                schedule()
+                ActivityChanges.notifyChanged()
+            }
+        }
+        if (!online) return@withLock JoinResult.QUEUED
+
+        val failure = sendEnrollment(action, api, isCurrentUser)
+        if (failure != null && !isTemporaryEnrollmentFailure(failure)) throw failure
+        if (failure == null) JoinResult.SYNCED else JoinResult.QUEUED
+    }
+
+    /** Returns false if the server rejects the action and propagates retryable failures. */
+    suspend fun syncEnrollment(action: PendingAction, isCurrentUser: () -> Boolean): Boolean =
+        enrollmentMutex.withLock {
+            // The queue may have changed while the worker waited for the lock.
+            // Read the current row before sending it.
+            val current = dao.getPendingActions(action.userId)
+                .firstOrNull { it.id == action.id }?.toDomainOrNull()
+                ?: return@withLock true
+            val failure = sendEnrollment(current, apiServiceProvider, isCurrentUser)
+            if (failure != null && isTemporaryEnrollmentFailure(failure)) {
+                dao.updateAction(PendingActionEntity(
+                    current.id, current.userId, current.type.name, current.payload.toString(),
+                    current.createdAt, current.retryCount + 1
+                ))
+                throw failure
+            }
+            failure == null
+        }
+
+    private suspend fun sendEnrollment(
+        action: PendingAction,
+        api: () -> ApiService,
+        isCurrentUser: () -> Boolean
+    ): Exception? {
+        val joining = action.type == PendingActionType.JOIN_ACTIVITY
+        val join = if (joining) JoinPayload.fromJson(action.payload) else null
+        val id = if (joining) join?.activityId else CancelEnrollmentPayload.fromJson(action.payload)?.activityId
+        val db = requireNotNull(database)
+        if (id == null) {
+            dao.deleteAction(action.id, action.userId)
+            return IllegalArgumentException("La accion no contiene una actividad")
+        }
+        if (!isCurrentUser()) return IOException("La sesion cambio")
+
+        var confirmedAfterConflict: Boolean? = null
+        var cancellationRemovedEnrollment = false
+        val account = EnrollmentAccount(action.userId)
+        val failure = try {
+            if (join != null) {
+                api().join(id, join.recommendationId, join.freeTimeMinutes, account)
+            } else {
+                val response = api().leave(id, account)
+                // The server returns 404 when the enrollment is already absent.
+                // This also covers a successful cancellation whose response was lost.
+                if (!response.isSuccessful && response.code() != 404) throw HttpException(response)
+                cancellationRemovedEnrollment = response.isSuccessful
+            }
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // A 409 can also mean the activity is full. Fetch its details to
+            // distinguish that case from an already-confirmed enrollment.
+            if (join != null && e is HttpException && e.code() == 409) {
+                try {
+                    if (!isCurrentUser()) throw IOException("La sesion cambio")
+                    val detail = api().getActivity(id, account = account)
+                    if (!detail.isSuccessful) throw HttpException(detail)
+                    val remoteJoined = detail.body()?.get("joined")
+                        ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+                        ?.asBoolean
+                        ?: throw IOException("El servidor no devolvio el estado de inscripcion")
+                    confirmedAfterConflict = remoteJoined
+                    if (remoteJoined) null else e
+                } catch (verifyError: CancellationException) {
+                    throw verifyError
+                } catch (verifyError: Exception) {
+                    IOException("No se pudo confirmar la inscripcion", verifyError)
+                }
+            } else if (e is HttpException || e is IOException) e else
+                IOException("No se pudo confirmar el cambio de inscripcion", e)
+        }
+
+        // Commit the enrollment state and remove the queued action together once
+        // the server gives a definitive answer. On rejection, restore the confirmed state.
+        if (failure == null || !isTemporaryEnrollmentFailure(failure)) {
+            withContext(NonCancellable) {
+                db.withTransaction {
+                    val enrollments = db.userEnrollmentDao()
+                    val previous = enrollments.get(action.userId, id)
+                        ?: UserEnrollmentEntity(action.userId, id, joined = !joining)
+                    val updated = if (failure == null) {
+                        previous.withConfirmedMembership(joining, cancellationRemovedEnrollment)
+                    } else {
+                        val confirmed = confirmedAfterConflict ?: previous.confirmedJoined
+                        previous.copy(joined = confirmed, cancellationPending = false, confirmedJoined = confirmed)
+                    }
+                    enrollments.upsert(updated)
+                    dao.deleteAction(action.id, action.userId)
+                }
+            }
+        }
+        ActivityChanges.notifyChanged()
+        return failure
+    }
+
+    /**
+     * Records confirmed membership transitions while retaining the latest cancellation.
+     * A 404 after reversing an unsent join leaves no history because there is no evidence
+     * that the user ever enrolled. A 404 for a known enrollment still confirms its removal.
+     */
+    private fun UserEnrollmentEntity.withConfirmedMembership(
+        joined: Boolean,
+        cancellationRemovedEnrollment: Boolean = false
+    ): UserEnrollmentEntity {
+        val now = System.currentTimeMillis()
+        return copy(
+            joined = joined,
+            cancellationPending = false,
+            confirmedJoined = joined,
+            enrolledAt = if (joined && (!confirmedJoined || enrolledAt == null)) now else enrolledAt,
+            canceledAt = if (!joined && (confirmedJoined || cancellationRemovedEnrollment)) now else canceledAt
+        )
+    }
+
+    private fun isTemporaryEnrollmentFailure(error: Exception): Boolean =
+        error is IOException || error is HttpException &&
+            (error.code() in listOf(401, 408, 425, 429) || error.code() >= 500)
 
     private val dao: PendingActionDao
         get() = pendingActionDao
@@ -274,6 +485,13 @@ class PendingActionRepository(
     }
 
     companion object {
+        // The worker and screens create separate repositories for the same database,
+        // so the lock must be shared across instances.
+        private val enrollmentMutex = Mutex()
+
+        private fun cancellationActionId(userId: String, activityId: String): String =
+            "${PendingActionType.CANCEL_ENROLLMENT.name}:$userId:$activityId"
+
         const val MAX_RETRIES = 5
         const val LOCAL_PHOTO_PATH = "localPhotoPath"
         const val BACKEND_ACTIVITY_ID = "backendActivityId"

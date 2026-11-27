@@ -24,18 +24,20 @@ import kotlinx.coroutines.withContext
  * ViewModel responsible for fetching, filtering, and joining recommended activities.
  * Extends AndroidViewModel to access the Application context and obtain Room database DAOs.
  */
-class RecommendationsViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val activityRepository = ActivityRepository(
-        activityDao = (application as App).database.activityDao(),
-        // El buzon de acciones pendientes: sin el, tocar "Unirme" sin internet fallaria
-        // con un error en vez de guardarse para enviarlo despues.
-        pendingActions = PendingActionRepository(
-            (application as App).database.pendingActionDao()
-        )
-    )
-    private val preferencesRepository = PreferencesRepository(
-        preferencesDao = (application as App).database.preferencesDao()
+class RecommendationsViewModel internal constructor(
+    application: Application,
+    private val activityRepository: ActivityRepository,
+    private val preferencesRepository: PreferencesRepository
+) : AndroidViewModel(application) {
+    constructor(application: Application) : this(
+        application,
+        ActivityRepository(
+            activityDao = (application as App).database.activityDao(),
+            // El buzon de acciones pendientes: sin el, tocar "Unirme" sin internet fallaria
+            // con un error en vez de guardarse para enviarlo despues.
+            pendingActions = PendingActionRepository(application.database)
+        ),
+        PreferencesRepository(application.database.preferencesDao())
     )
 
     private val _isOffline = MutableStateFlow(false)
@@ -150,33 +152,28 @@ class RecommendationsViewModel(application: Application) : AndroidViewModel(appl
     }
 
     /**
-     * Inscribe al usuario, funcione o no el internet.
-     *
-     * @param onSuccess recibe true cuando la inscripcion quedo GUARDADA esperando conexion,
-     *        y false cuando el backend ya la confirmo. La tarjeta usa ese dato para decir
-     *        "Pendiente" en vez de "Unido", porque prometer un cupo que el servidor no ha
-     *        confirmado es lo unico que el usuario no nos perdonaria.
-     * @param onError solo se llama cuando el backend RECHAZO la inscripcion. Los fallos de
-     *        red ya no llegan aqui: esos los guarda el repositorio en la cola offline.
+     * Updates enrollment from the activity card and reports whether the change
+     * is still pending or confirmed by the server.
      */
-    fun joinActivity(
+    fun changeEnrollment(
         activity: Activity,
+        joined: Boolean,
         onSuccess: (queued: Boolean) -> Unit,
         onError: (String) -> Unit
     ) {
         viewModelScope.launch {
             try {
-                val result = activityRepository.joinActivity(
+                val result = if (joined) activityRepository.joinActivity(
                     activityId = activity.id,
                     recommendationId = activity.recommendationId,
                     freeTimeMinutes = activity.freeTimeMinutes
-                )
+                ) else activityRepository.cancelEnrollment(activity.id)
                 withContext(Dispatchers.Main) {
                     onSuccess(result == JoinResult.QUEUED)
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    onError(e.message ?: "Error al unirse a la actividad")
+                    onError(e.message ?: "No se pudo actualizar la inscripcion")
                 }
             }
         }

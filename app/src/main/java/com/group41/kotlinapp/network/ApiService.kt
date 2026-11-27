@@ -14,7 +14,11 @@ import retrofit2.http.POST
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Tag
 import java.util.TimeZone
+
+/** Identifies the account that must authenticate an enrollment request. */
+data class EnrollmentAccount(val userId: String)
 
 interface ApiService {
     @POST("api/auth/login")
@@ -52,21 +56,24 @@ interface ApiService {
         @Query("lat") lat: Double,
         @Query("lon") lon: Double,
         @Query("radius") radiusKm: Double? = null,
-        @Query("tz") tz: String = TimeZone.getDefault().id
+        @Query("tz") tz: String = TimeZone.getDefault().id,
+        @Tag account: EnrollmentAccount? = null
     ): Response<JsonArray>
 
     @GET("api/activities")
     suspend fun nearbyActivities(
         @Query("lat") lat: Double,
         @Query("lon") lon: Double,
-        @Query("radius") radiusKm: Double
+        @Query("radius") radiusKm: Double,
+        @Tag account: EnrollmentAccount? = null
     ): Response<JsonArray>
 
     @GET("api/activities/{id}")
     suspend fun getActivity(
         @Path("id") activityId: String,
         @Query("lat") lat: Double? = null,
-        @Query("lon") lon: Double? = null
+        @Query("lon") lon: Double? = null,
+        @Tag account: EnrollmentAccount? = null
     ): Response<JsonObject>
 
     @POST("api/activities")
@@ -88,8 +95,16 @@ interface ApiService {
     suspend fun join(
         @Path("id") activityId: String,
         @Query("recommendationId") recommendationId: String? = null,
-        @Query("freeTimeMinutes") freeTimeMinutes: Int? = null
+        @Query("freeTimeMinutes") freeTimeMinutes: Int? = null,
+        @Tag account: EnrollmentAccount? = null
     ): JsonObject
+
+    /** Cancels the authenticated user's enrollment in the specified activity. */
+    @DELETE("api/activities/{id}/leave")
+    suspend fun leave(
+        @Path("id") activityId: String,
+        @Tag account: EnrollmentAccount? = null
+    ): Response<Unit>
 
     @POST("api/schedules/sync/google")
     suspend fun syncGoogle(
@@ -114,6 +129,52 @@ interface ApiService {
         @Query("date") date: String,
         @Query("tz") tz: String = TimeZone.getDefault().id
     ): List<FriendScheduleDto>
+
+    // ----- Cupones comerciales (CampusDeals) -----
+
+    /**
+     * El catalogo vigente.
+     *
+     * LA MITAD HTTP DEL CACHE DE CUPONES
+     *
+     * Quien decide que esta respuesta se puede guardar es el SERVIDOR, no el telefono:
+     * `DealController` la devuelve con `Cache-Control: public, max-age=300`. OkHttp lee
+     * ese header y guarda el cuerpo en su cache de disco de 10 MB.
+     *
+     * Que el cliente ponga el mismo header en la respuesta no serviria para esto, y
+     * conviene saberlo: el `Cache` de OkHttp vive mas adentro de la cadena que los
+     * interceptores de aplicacion, asi que lo que se guarda es la respuesta tal como
+     * llego de la red, antes de que un interceptor de aplicacion la reescriba. Lo que SI
+     * funciona desde esa capa es reescribir la PETICION, que es como se pide la copia
+     * guardada cuando no hay conexion (`only-if-cached`).
+     *
+     * A diferencia de `/api/activities`, este catalogo no se fuerza a `no-cache` estando
+     * en linea, asi que los cinco minutos se aprovechan de verdad. Ver la excepcion
+     * documentada en `ApiClient`.
+     *
+     * Son dos caches encima del otro y cada uno cubre algo distinto: este, de disco,
+     * ahorra la peticion de red; `DealsMemoryCache` ahorra incluso la lectura de disco.
+     */
+    @GET("api/deals")
+    suspend fun deals(): List<DealDto>
+
+    /** Reporta en lote que unos cupones se mostraron o se abrieron. */
+    @POST("api/deals/interactions")
+    suspend fun reportDealInteractions(@Body body: DealInteractionBatch): Int
+
+    /**
+     * Redime un cupon.
+     *
+     * El contexto del descanso viaja en el cuerpo porque solo el telefono sabe si el
+     * estudiante estaba en un hueco en el momento de redimir. Para una redencion hecha
+     * sin conexion y enviada horas despues, calcularlo en el servidor con la hora de
+     * llegada registraria el descanso equivocado.
+     */
+    @POST("api/deals/{id}/redeem")
+    suspend fun redeemDeal(
+        @Path("id") dealId: String,
+        @Body context: DealInteractionDto
+    ): RedemptionDto
 }
 
 /** A recommendation payload with the ID assigned by the backend. */

@@ -104,5 +104,7 @@ dependencies {
     // que quedaron guardadas mientras no habia internet.
     implementation(libs.work.runtime.ktx)
     implementation(libs.androidx.datastore.preferences)
+    // Base de datos llave/valor sobre mmap. Ver storage/FastKeyValueStore.kt para el porque.
+    implementation(libs.mmkv)
 
 }

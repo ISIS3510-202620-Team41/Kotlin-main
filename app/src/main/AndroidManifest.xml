@@ -48,6 +48,17 @@
             android:name=".NearbyMeetingPointActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />
+        <!-- exported="false": son pantallas internas, no hay razon para que otra app
+             pueda abrirlas. -->
+        <activity
+            android:name=".PendingActionsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".CampusDealsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false" />
         <activity
             android:name=".ActivityDetailActivity"
             android:exported="false"

@@ -1,8 +1,13 @@
 package com.group41.kotlinapp
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
+import android.view.LayoutInflater
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -14,10 +19,16 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -34,15 +46,23 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.group41.kotlinapp.repository.ActivityChanges
 import com.group41.kotlinapp.connectivity.ConnectivityObserver
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,44 +73,326 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.ViewCompat
+import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import coil.compose.AsyncImage
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.group41.kotlinapp.model.Activity
+import com.group41.kotlinapp.data.local.AppDatabase
 import com.group41.kotlinapp.network.ApiClient
+import com.group41.kotlinapp.network.ApiService
+import com.group41.kotlinapp.repository.ActivityRepository
+import com.group41.kotlinapp.repository.PendingActionRepository
+import com.group41.kotlinapp.repository.PreferencesRepository
+import com.group41.kotlinapp.storage.AgendaCalendarExporter
+import com.group41.kotlinapp.storage.AgendaPreferencesStore
 import com.group41.kotlinapp.ui.theme.KotlinAppTheme
 import com.group41.kotlinapp.ui.theme.LlamallaBlack
 import com.group41.kotlinapp.ui.theme.LlamallaBlue
 import com.group41.kotlinapp.ui.theme.LlamallaRose
+import com.group41.kotlinapp.ui.theme.LlamallaWhite
+import com.group41.kotlinapp.viewmodel.AgendaViewModel
+import com.group41.kotlinapp.viewmodel.AgendaUiState
 import com.group41.kotlinapp.viewmodel.RecommendationsViewModel
+import java.time.LocalDate
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
 
+/** Supplies one session and repository environment to both main tabs and the agenda. */
+internal data class MainActivityDependencies(
+    val database: AppDatabase,
+    val accountIds: Flow<String?>,
+    val currentUserId: () -> String?,
+    val api: () -> ApiService,
+    val online: () -> Boolean,
+    val agendaPreferences: AgendaPreferencesStore
+) {
+    /** Uses the same database and account source for reads and enrollment changes. */
+    fun activityRepository() = ActivityRepository(
+        activityDao = database.activityDao(),
+        pendingActions = PendingActionRepository(database, api),
+        apiProvider = api,
+        online = online,
+        currentUserId = currentUserId
+    )
+}
+
+/** Hosts the main tabs and agenda, and prepares enrollment thumbnails while visible. */
 class MainActivity : ComponentActivity() {
+
+    private var selectedTab by mutableIntStateOf(R.id.nav_home)
+    private var agendaOpen by mutableStateOf(false)
+    private val dependencies by lazy {
+        val app = application as App
+        dependenciesForTest ?: MainActivityDependencies(
+            app.database,
+            ApiClient.tokens.userIds,
+            { ApiClient.tokens.userId },
+            { ApiClient.api },
+            { ApiClient.isOnline() },
+            app.agendaPreferences
+        )
+    }
+    private val viewModels by lazy {
+        ViewModelProvider(this, viewModelFactory {
+            initializer {
+                AgendaViewModel(
+                    application,
+                    dependencies.database.userEnrollmentDao(),
+                    dependencies.accountIds,
+                    dependencies.agendaPreferences
+                )
+            }
+            initializer {
+                RecommendationsViewModel(
+                    application,
+                    dependencies.activityRepository(),
+                    PreferencesRepository(dependencies.database.preferencesDao())
+                )
+            }
+        })
+    }
+    private val agendaViewModel by lazy { viewModels[AgendaViewModel::class.java] }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        selectedTab = savedInstanceState?.getInt(TAB_KEY) ?: intent.requestedTab()
+        agendaOpen = selectedTab == R.id.nav_activities &&
+            savedInstanceState?.getBoolean(AGENDA_KEY) == true
+        observeActivityThumbnails()
 
         val recommendationsViewModel =
-            ViewModelProvider(this)[RecommendationsViewModel::class.java]
+            viewModels[RecommendationsViewModel::class.java]
 
         enableEdgeToEdge()
 
         setContent {
             KotlinAppTheme {
-                RecommendationScreen(
-                    viewModel = recommendationsViewModel
-                )
+                val userId by dependencies.accountIds.collectAsStateWithLifecycle(dependencies.currentUserId())
+                BackHandler(enabled = selectedTab == R.id.nav_activities) {
+                    if (agendaOpen) agendaOpen = false else selectedTab = R.id.nav_home
+                }
+                Column(
+                    Modifier.fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                ) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (selectedTab == R.id.nav_activities) {
+                            ActivitiesTab(userId)
+                        } else {
+                            RecommendationScreen(recommendationsViewModel, userId, dependencies.currentUserId)
+                        }
+                    }
+                    if (!agendaOpen) Box(Modifier.fillMaxWidth().background(LlamallaWhite).navigationBarsPadding()) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxWidth(),
+                            factory = { context ->
+                                val bar = LayoutInflater.from(context)
+                                    .inflate(R.layout.view_bottom_navigation, null) as BottomNavigationView
+                                // Compose pads the bar for system navigation insets.
+                                ViewCompat.setOnApplyWindowInsetsListener(bar) { _, insets -> insets }
+                                bar.setOnItemSelectedListener { item ->
+                                    when (item.itemId) {
+                                        R.id.nav_home, R.id.nav_activities -> {
+                                            selectedTab = item.itemId
+                                            true
+                                        }
+                                        R.id.nav_profile -> {
+                                            startActivity(Intent(this@MainActivity, ProfileActivity::class.java))
+                                            false
+                                        }
+                                        else -> false
+                                    }
+                                }
+                                bar
+                            },
+                            update = { it.menu.findItem(selectedTab).isChecked = true }
+                        )
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * Prefetches the signed-in user's Room thumbnails whenever their URLs change or
+     * connectivity returns. The observer runs independently of the selected tab.
+     */
+    private fun observeActivityThumbnails() {
+        val app = application as App
+        val connectivity = ConnectivityObserver(app)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Cancel the old Room observer and its downloads when the account changes.
+                dependencies.accountIds.collectLatest { userId ->
+                    if (userId.isNullOrBlank()) return@collectLatest
+
+                    dependencies.database.userEnrollmentDao().observeEnrolledActivities(userId)
+                        .combine(connectivity.isOnline) { enrollments, online ->
+                            if (online) {
+                                enrollments.mapNotNull { enrollment ->
+                                    enrollment.activity?.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
+                                }.toSet()
+                            } else {
+                                emptySet()
+                            }
+                        }
+                        // Status updates and row reordering can leave the image URLs unchanged.
+                        .distinctUntilChanged()
+                        .catch { Log.w("MainActivity", "Could not observe enrollment thumbnails") }
+                        .collectLatest { urls ->
+                            // Going offline emits an empty set and cancels the in-flight batch.
+                            if (urls.isNotEmpty()) {
+                                app.activityThumbnailPrefetcher.prefetchThumbnails(urls.toList())
+                            }
+                        }
+                }
+            }
+        }
+    }
+
+    /** Hosts both Activities destinations so they share the same connectivity observation. */
+    @Composable
+    private fun ActivitiesTab(userId: String?) {
+        val connectivity = remember { ConnectivityObserver(applicationContext) }
+        val isOnline by connectivity.isOnline.collectAsStateWithLifecycle(connectivity.currentlyOnline())
+        if (agendaOpen) {
+            val state by agendaViewModel.uiState.collectAsStateWithLifecycle()
+            val preferences = state.preferences.takeIf { state.userId == userId }
+            // Wait for the account's saved preferences before initializing its calendar selection.
+            if (!userId.isNullOrBlank() && preferences == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                return
+            }
+            key(userId) {
+                AgendaDestination(userId, isOnline, state.takeIf { it.userId == userId })
+            }
+            return
+        }
+        val database = dependencies.database
+        val repository = remember { dependencies.activityRepository() }
+        MyActivitiesScreen(
+            userId = userId,
+            enrollmentDao = database.userEnrollmentDao(),
+            isOnline = isOnline,
+            onOpenActivity = { startActivity(ActivityDetailActivity.createIntent(this, it)) },
+            cancelEnrollment = { repository.cancelEnrollment(it) },
+            loadActivity = { repository.getActivityById(it) },
+            onOpenAgenda = { agendaOpen = true }
+        )
+    }
+
+    @Composable
+    private fun AgendaDestination(userId: String?, isOnline: Boolean, state: AgendaUiState?) {
+        val scope = rememberCoroutineScope()
+        var exporting by remember { mutableStateOf(false) }
+        val preferences = state?.preferences
+        PersonalAgendaScreen(
+            activities = state?.activities.orEmpty(),
+            accountId = userId,
+            monthCache = agendaViewModel.monthCache,
+            isOnline = isOnline,
+            onBack = { agendaOpen = false },
+            initialDate = preferences?.openingDate() ?: LocalDate.now(),
+            preferences = preferences,
+            onShowPendingChange = { enabled ->
+                userId?.let { agendaViewModel.setShowPending(it, enabled) }
+            },
+            onRememberDateChange = { enabled, date ->
+                userId?.let { agendaViewModel.setRememberDate(it, enabled, date) }
+            },
+            onDateSelected = { date ->
+                userId?.let { agendaViewModel.selectDate(it, date) }
+            },
+            onExportCalendar = if (exporting || userId.isNullOrBlank()) null else {
+                {
+                    val accountId = dependencies.currentUserId()
+                    if (!exporting && !accountId.isNullOrBlank() && accountId == userId) {
+                        exporting = true
+                        scope.launch {
+                            try {
+                                shareAgenda(accountId)
+                            } finally {
+                                exporting = false
+                            }
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    /** Shares a fresh Room snapshot only while its account is still signed in. */
+    private suspend fun shareAgenda(accountId: String) {
+        try {
+            val activities = agendaViewModel.activitiesForExport(accountId)
+            if (dependencies.currentUserId() != accountId) return
+            val shareIntent = AgendaCalendarExporter.createShareIntent(this, activities)
+            if (dependencies.currentUserId() != accountId) return
+
+            if (shareIntent == null) {
+                Toast.makeText(this, "No tienes actividades confirmadas para exportar.", Toast.LENGTH_SHORT).show()
+            } else {
+                startActivity(Intent.createChooser(shareIntent, "Exportar calendario"))
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w("MainActivity", "Could not share calendar export", error)
+            if (dependencies.currentUserId() == accountId) {
+                Toast.makeText(this, "No se pudo exportar el calendario.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        agendaOpen = false
+        selectedTab = intent.requestedTab()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt(TAB_KEY, selectedTab)
+        outState.putBoolean(AGENDA_KEY, agendaOpen)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun Intent.requestedTab(): Int =
+        if (getIntExtra(TAB_KEY, R.id.nav_home) == R.id.nav_activities) R.id.nav_activities else R.id.nav_home
+
+    companion object {
+        /** Installed before the activity starts so navigation tests never change stored credentials. */
+        @VisibleForTesting
+        @Volatile
+        internal var dependenciesForTest: MainActivityDependencies? = null
+
+        private const val TAB_KEY = "main_tab"
+        private const val AGENDA_KEY = "personal_agenda_open"
+
+        /** Returns from Profile to the requested tab in the existing MainActivity. */
+        internal fun tabIntent(context: Context, tab: Int): Intent =
+            Intent(context, MainActivity::class.java)
+                .putExtra(TAB_KEY, tab)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun RecommendationScreen(
-    viewModel: RecommendationsViewModel
+private fun RecommendationScreen(
+    viewModel: RecommendationsViewModel,
+    userId: String?,
+    currentUserId: () -> String?
 ) {
     val context = LocalContext.current
     val isOffline by viewModel.isOffline.collectAsState()
-    val userId = ApiClient.tokens.userId
 
     var selectedCategories by remember {
         mutableStateOf(setOf<String>())
@@ -151,7 +453,8 @@ fun RecommendationScreen(
     )
 
     Scaffold(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top)
     ) { innerPadding ->
 
         LazyColumn(
@@ -225,24 +528,7 @@ fun RecommendationScreen(
                 ) {
                     Button(
                         onClick = {
-                            context.startActivity(
-                                Intent(context, ProfileActivity::class.java)
-                            )
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LlamallaBlue,
-                            contentColor = LlamallaBlack
-                        )
-                    ) {
-                        Text("Perfil")
-                    }
-
-                    Button(
-                        onClick = {
-                            context.startActivity(
-                                Intent(context, NearbyMeetingPointActivity::class.java)
-                            )
+                            context.startActivity(Intent(context, NearbyMeetingPointActivity::class.java))
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(
@@ -326,8 +612,8 @@ fun RecommendationScreen(
             item {
                 Button(
                     onClick = {
-                        val currentUserId = ApiClient.tokens.userId
-                        if (currentUserId.isNullOrBlank()) {
+                        val activeUserId = currentUserId()
+                        if (activeUserId.isNullOrBlank()) {
                             errorMessage = "Usuario no autenticado"
                             return@Button
                         }
@@ -336,11 +622,11 @@ fun RecommendationScreen(
                         errorMessage = null
 
                         viewModel.updatePreferences(
-                            userId = currentUserId,
+                            userId = activeUserId,
                             categories = selectedCategories,
                             onSuccess = {
                                 viewModel.loadRecommendedActivities(
-                                    userId = currentUserId,
+                                    userId = activeUserId,
                                     latitude = 4.6382,
                                     longitude = -74.0840,
                                     radiusKm = 10.0,
@@ -575,12 +861,13 @@ fun RecommendationCard(
                         isJoining = true
                         joinError = null
 
-                        viewModel.joinActivity(
+                        // Allow users to reverse a pending join or cancellation from the card.
+                        val joining = !isJoined
+                        viewModel.changeEnrollment(
                             activity = activity,
-                            // queued = true significa que no habia internet y la inscripcion
-                            // se guardo para mandarla despues.
+                            joined = joining,
                             onSuccess = { queued ->
-                                isJoined = true
+                                isJoined = joining
                                 isJoining = false
                                 isPendingSync = queued
                             },
@@ -590,7 +877,7 @@ fun RecommendationCard(
                             }
                         )
                     },
-                    enabled = !isJoined && !isPendingSync && !isJoining,
+                    enabled = !isJoining,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -601,12 +888,11 @@ fun RecommendationCard(
                     )
                 ) {
                     Text(
-                        // "Pendiente" y no "Unido" mientras el servidor no confirme: el
-                        // reloj dice que esta guardado pero todavia en camino.
                         text = when {
-                            isJoining -> "Uniendo..."
-                            isJoined && isPendingSync -> "Pendiente de enviar ⏱"
-                            isJoined -> "Unido ✓"
+                            isJoining -> "Actualizando..."
+                            isJoined && isPendingSync -> "Inscripcion pendiente · Cancelar"
+                            isPendingSync -> "Cancelacion pendiente · Volver a unirme"
+                            isJoined -> "Cancelar inscripcion"
                             else -> "Unirme"
                         }
                     )

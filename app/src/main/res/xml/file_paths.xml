@@ -3,8 +3,12 @@
     Carpetas que FileProvider puede compartir con otras apps.
     camera/ en caché para fotos de perfil temporales y activities/ en archivos
     internos para fotos de actividades persistentes.
+    exports/ en archivos internos para los JSON que el usuario pide exportar: tienen que
+    poder mandarse por correo o guardarse fuera de la app, y para eso la otra app necesita
+    un content:// sobre esa carpeta.
 -->
 <paths>
     <cache-path name="camera" path="camera/" />
     <files-path name="activity_photos" path="activities/" />
+    <files-path name="data_exports" path="exports/" />
 </paths>

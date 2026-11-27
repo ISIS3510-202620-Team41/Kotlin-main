@@ -2,7 +2,15 @@ package com.group41.kotlinapp.data.local
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import com.group41.kotlinapp.data.local.dao.UserEnrollmentDao
+import com.group41.kotlinapp.data.local.entity.UserEnrollmentEntity
 import com.group41.kotlinapp.data.local.dao.ActivityDao
+import com.group41.kotlinapp.data.local.dao.DealDao
+import com.group41.kotlinapp.data.local.entity.DealEntity
+import com.group41.kotlinapp.data.local.dao.SearchHistoryDao
+import com.group41.kotlinapp.data.local.dao.SyncLogDao
+import com.group41.kotlinapp.data.local.entity.SearchHistoryEntity
+import com.group41.kotlinapp.data.local.entity.SyncLogEntity
 import com.group41.kotlinapp.data.local.dao.PreferencesDao
 import com.group41.kotlinapp.data.local.entity.ActivityEntity
 import com.group41.kotlinapp.data.local.entity.UserPreferenceEntity
@@ -14,14 +22,26 @@ import com.group41.kotlinapp.data.local.entity.PendingActionEntity
  * Serves as the database holder and main access point to the underlying persisted data.
  */
 @Database(
-    entities = [ActivityEntity::class, UserPreferenceEntity::class
-    , PendingActionEntity::class
+    entities = [
+        ActivityEntity::class,
+        UserPreferenceEntity::class,
+        PendingActionEntity::class,
+        UserEnrollmentEntity::class,
+        SearchHistoryEntity::class,
+        SyncLogEntity::class,
+        DealEntity::class
     ],
-    // La version sube cada vez que cambia la forma de alguna tabla. Pasa a 2 porque se
-    // agrego la columna `pendingSync` a `activities`. Por cada salto de version tiene que
-    // existir una migracion en Migrations.kt, o la app se cerrara al abrirse en un telefono
-    // que ya tenia la version anterior instalada.
-    version = 2,
+    // La version sube cada vez que cambia la forma de alguna tabla, y por cada salto tiene
+    // que existir una migracion en Migrations.kt, o la app se cerrara al abrirse en un
+    // telefono que ya tenia la version anterior instalada.
+    //
+    // Pasa a 5 porque se agregaron dos tablas nuevas: `search_history`, el historial de
+    // busquedas por cercania, y `sync_log`, el registro de intentos de sincronizacion.
+    // Agregar una tabla cambia la forma de la base igual que agregar una columna.
+    //
+    // Pasa a 6 porque se agrego `deals`, el catalogo de cupones comerciales que la
+    // pantalla de CampusDeals necesita tener guardado para funcionar sin conexion.
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -52,4 +72,20 @@ abstract class AppDatabase : RoomDatabase() {
      * the database instance.
      */
     abstract fun pendingActionDao(): PendingActionDao
+
+    /** Provides the Room DAO for account-scoped enrollment records. */
+    abstract fun userEnrollmentDao(): UserEnrollmentDao
+
+    /**
+     * Expone las consultas del historial de busquedas por cercania.
+     */
+    abstract fun searchHistoryDao(): SearchHistoryDao
+
+    /**
+     * Expone las consultas del registro de intentos de sincronizacion.
+     */
+    abstract fun syncLogDao(): SyncLogDao
+
+    /** Expone las consultas del catalogo de cupones comerciales. */
+    abstract fun dealDao(): DealDao
 }

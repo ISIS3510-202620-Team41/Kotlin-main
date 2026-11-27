@@ -197,6 +197,22 @@ fun NearbyMeetingPointScreen(
                 )
             }
 
+            // Aviso aparte del anterior: aqui lo viejo no son las actividades, es la
+            // posicion. Pasa cuando el telefono no logro medir (metro, sotano, ubicacion
+            // recien encendida) y se uso la ultima posicion que la app tenia guardada.
+            //
+            // Se le dice al usuario en vez de callarlo porque cambia el significado de la
+            // lista: no es "cerca de ti", es "cerca de donde estabas".
+            state.locationAgeMillis?.let { ageMillis ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Ubicacion de hace ${formatAge(ageMillis)}: " +
+                        "el telefono no pudo medir tu posicion ahora.",
+                    color = Color(0xFFB26A00),
+                    fontSize = 13.sp
+                )
+            }
+
             if (state.hasSearched && state.activities.isEmpty() && state.error == null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -270,3 +286,18 @@ fun NearbyActivityCard(
 /** 450 -> "450 m", 2300 -> "2.3 km". */
 private fun formatDistance(meters: Int): String =
     if (meters < 1000) "$meters m" else "%.1f km".format(meters / 1000.0)
+
+/**
+ * Convierte una edad en milisegundos a algo que una persona entienda.
+ *
+ * Se redondea a la unidad grande ("hace 2 h" y no "hace 2 h 14 min") porque el usuario no
+ * necesita precision aqui: solo decidir si confiar en la lista o moverse y volver a buscar.
+ */
+private fun formatAge(ageMillis: Long): String {
+    val minutes = ageMillis / 60_000
+    return when {
+        minutes < 1 -> "menos de un minuto"
+        minutes < 60 -> "$minutes min"
+        else -> "${minutes / 60} h"
+    }
+}
