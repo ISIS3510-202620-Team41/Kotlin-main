@@ -9,7 +9,9 @@ import com.group41.kotlinapp.network.ApiService
 import com.group41.kotlinapp.network.DealDto
 import com.group41.kotlinapp.network.DealInteractionBatch
 import com.group41.kotlinapp.network.DealInteractionDto
+import com.group41.kotlinapp.model.RedeemDealPayload
 import com.group41.kotlinapp.network.RedemptionDto
+import com.group41.kotlinapp.sync.SyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -31,6 +33,14 @@ import java.util.Locale
  */
 class DealRepository(
     private val dealDao: DealDao,
+    /**
+     * La cola de acciones pendientes.
+     *
+     * Es nullable porque los tests que solo miran el catalogo no la necesitan. Cuando
+     * falta, una redencion sin conexion se marca en el telefono pero no se encola: se
+     * avisa en el log en vez de fallar en silencio.
+     */
+    private val pendingActions: PendingActionRepository? = null,
     private val apiProvider: () -> ApiService = { ApiClient.api },
     /**
      * Si hay conexion, como funcion.
@@ -40,6 +50,15 @@ class DealRepository(
      * computador sin emulador.
      */
     private val online: () -> Boolean = { ApiClient.isOnline() },
+    /**
+     * Quien es el usuario de la sesion, como funcion.
+     *
+     * Mismo motivo que `online`: `ApiClient.tokens` es un `lateinit` que solo existe
+     * dentro de la app, asi que leerlo directamente haria que cualquier prueba de
+     * escritorio que pase por aqui reviente con "lateinit property tokens has not been
+     * initialized".
+     */
+    private val currentUserId: () -> String? = { ApiClient.tokens.userId },
     private val now: () -> Long = System::currentTimeMillis,
     private val logWarning: (String, Throwable) -> Unit = { message, error ->
         Log.w("DealRepository", message, error)
@@ -170,12 +189,7 @@ class DealRepository(
         )
 
         if (!online()) {
-            // Se marca como redimido en el telefono antes de que el servidor lo sepa, con
-            // la bandera de pendiente. El usuario ve la respuesta al instante y la
-            // pantalla es honesta sobre que falta confirmarlo.
-            dealDao.markRedeemed(dealId, pendingSync = true, code = null)
-            DealsMemoryCache.invalidateAll()
-            return@withContext RedeemResult.Queued
+            return@withContext queueRedemption(dealId, duringBreak, breakMinutesLeft)
         }
 
         try {
@@ -187,10 +201,52 @@ class DealRepository(
             // La red se cayo a mitad. Se encola igual, porque la intencion del usuario no
             // se puede perder por un fallo de transporte.
             logWarning("No se pudo redimir en linea, queda pendiente", error)
-            dealDao.markRedeemed(dealId, pendingSync = true, code = null)
-            DealsMemoryCache.invalidateAll()
-            RedeemResult.Queued
+            queueRedemption(dealId, duringBreak, breakMinutesLeft)
         }
+    }
+
+    /**
+     * Guarda la redencion para enviarla cuando vuelva la conexion.
+     *
+     * Tres pasos, y el orden importa:
+     *
+     * 1. Encolar, para que la intencion del usuario sobreviva al cierre de la app.
+     * 2. Marcar el cupon como redimido y pendiente, para que la pantalla responda al
+     *    instante. Es la actualizacion optimista, y el aviso en ambar es lo que la
+     *    mantiene honesta.
+     * 3. Pedirle a Android que lo mande cuando haya red.
+     *
+     * Primero se persiste y despues se muestra: al reves, si el proceso muriera entre los
+     * dos pasos, la pantalla diria "redimido" sin que exista nada que enviar.
+     */
+    private suspend fun queueRedemption(
+        dealId: String,
+        duringBreak: Boolean?,
+        breakMinutesLeft: Int?
+    ): RedeemResult {
+        // Se mira la cola primero: sin ella no hay a donde encolar, y asi tampoco se
+        // toca ApiClient, que fuera de la app no esta inicializado.
+        val queue = pendingActions
+        val userId = if (queue == null) null else currentUserId()
+
+        if (userId != null && queue != null) {
+            queue.enqueueRedeemDeal(
+                userId = userId,
+                payload = RedeemDealPayload(dealId, duringBreak, breakMinutesLeft)
+            )
+            SyncScheduler.schedule(ApiClient.appContext)
+        } else {
+            // Sin sesion o sin cola no hay donde encolar. Se deja constancia en vez de
+            // callarlo: si no, el cupon quedaria marcado como pendiente para siempre.
+            logWarning(
+                "No se pudo encolar la redencion de $dealId",
+                IllegalStateException("sin sesion o sin cola de acciones pendientes")
+            )
+        }
+
+        dealDao.markRedeemed(dealId, pendingSync = true, code = null)
+        DealsMemoryCache.invalidateAll()
+        return RedeemResult.Queued
     }
 
     /**

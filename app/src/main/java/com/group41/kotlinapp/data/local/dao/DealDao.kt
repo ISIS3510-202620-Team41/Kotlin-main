@@ -109,6 +109,18 @@ interface DealDao {
     suspend fun clearPendingSync(id: String)
 
     /**
+     * Deshace una redencion que el servidor rechazo definitivamente.
+     *
+     * Pasa cuando el cupon vencio o el comercio lo retiro mientras estaba encolado. Hay
+     * que revertir y no solo quitar la bandera de pendiente: si se dejara `redeemed = 1`,
+     * el usuario creeria que tiene un descuento que el comercio no va a aceptar, y se
+     * enteraria en la caja. Es mejor que lo vea disponible otra vez, o que desaparezca
+     * por vencido, que darle una promesa falsa.
+     */
+    @Query("UPDATE deals SET redeemed = 0, pendingSync = 0, redemptionCode = NULL WHERE id = :id")
+    suspend fun revertRedemption(id: String)
+
+    /**
      * Borra los cupones vencidos, salvo los que el usuario redimio.
      *
      * Los redimidos se conservan aunque venzan: son su historial, y ademas uno redimido
