@@ -54,6 +54,8 @@ class OfflineDealRedemptionTest {
 
         override suspend fun deleteExpired(now: String) = Unit
 
+        override suspend fun deleteSeeded() = Unit
+
         override suspend fun count(): Int = stored.size
     }
 

@@ -137,6 +137,12 @@ class DealRepository(
             val remote = apiProvider().deals()
             dealDao.upsertAll(remote.map { it.toEntity(now()) })
 
+            // El catalogo real manda: las filas sembradas se retiran en cuanto el
+            // servidor responde, o el usuario veria cada cupon dos veces. Se borran
+            // despues del upsert y no antes, para no dejar la pantalla vacia si la
+            // escritura fallara a mitad.
+            if (remote.isNotEmpty()) dealDao.deleteSeeded()
+
             // Se limpian los vencidos despues de guardar, no antes: si la peticion
             // fallara a mitad, no tiene sentido haber borrado ya lo que habia.
             dealDao.deleteExpired(nowIso())

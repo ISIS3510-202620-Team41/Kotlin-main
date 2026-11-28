@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -96,6 +97,9 @@ private fun CampusDealsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // enableEdgeToEdge dibuja debajo de la barra de estado; sin esto el titulo
+            // se monta encima del reloj.
+            .safeDrawingPadding()
             .padding(20.dp)
     ) {
         Text(
