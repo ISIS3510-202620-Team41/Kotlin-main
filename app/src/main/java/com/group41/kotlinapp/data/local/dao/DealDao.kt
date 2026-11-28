@@ -130,6 +130,20 @@ interface DealDao {
     @Query("DELETE FROM deals WHERE validUntil IS NOT NULL AND validUntil < :now AND redeemed = 0")
     suspend fun deleteExpired(now: String)
 
+    /**
+     * Borra los cupones de ejemplo cuando llega el catalogo real del servidor.
+     *
+     * La siembra existe para que la pantalla funcione en un telefono donde el backend no
+     * esta disponible, pero sus filas llevan ids propios (`seed-*`) que nunca coinciden
+     * con los del servidor. Sin este borrado, el primer refresco exitoso deja las dos
+     * versiones del catalogo a la vez y el usuario ve cada cupon duplicado.
+     *
+     * Los redimidos se conservan: aunque sean de ejemplo, son una accion del usuario y
+     * una redencion encolada todavia tiene que llegar al servidor.
+     */
+    @Query("DELETE FROM deals WHERE id LIKE 'seed-%' AND redeemed = 0")
+    suspend fun deleteSeeded()
+
     @Query("SELECT COUNT(*) FROM deals")
     suspend fun count(): Int
 }

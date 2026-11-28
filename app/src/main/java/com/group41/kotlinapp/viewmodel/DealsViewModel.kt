@@ -118,18 +118,45 @@ class DealsViewModel(application: Application) : AndroidViewModel(application) {
 
             // --- Las dos cosas a la vez, no una detras de otra ---
             val catalogJob = async(Dispatchers.IO) {
-                // Se refresca desde el servidor si hay red. Devuelve si lo consiguio, que
-                // es lo que permite avisar en pantalla de que los datos son del telefono.
-                val refreshed = dealRepository.refresh()
-                // Y se lee por los tres niveles: memoria, y si no esta, la base local.
-                refreshed to dealRepository.catalogSnapshot()
+                // Se LEE primero y se refresca despues, no al reves.
+                //
+                // El orden importa y costo descubrirlo midiendo: refrescar invalida el
+                // cache en memoria, asi que hacerlo antes de leer significaba tirar lo
+                // guardado justo antes de consultarlo. Con conexion el cache no acertaba
+                // nunca, y la optimizacion solo servia sin red, que es el 10% del uso.
+                val snapshot = dealRepository.catalogSnapshot()
+
+                // Y solo se va al servidor cuando la lectura vino del disco. Si el
+                // catalogo sigue en memoria es que se consulto hace menos de diez
+                // minutos: no hay nada que valga la pena refrescar, y refrescarlo
+                // tiraria lo que acabamos de servir.
+                // Si NO se pudo hablar con el servidor habiendolo intentado. Es distinto
+                // de "no se refresco": cuando el catalogo sigue en memoria no hace falta
+                // preguntar, y decir "sin conexion" ahi seria mentir.
+                var offline = false
+                var refreshed = false
+                var result = snapshot
+
+                if (snapshot.source == CatalogSource.DISK) {
+                    refreshed = dealRepository.refresh()
+                    offline = !refreshed
+
+                    // Si el servidor trajo datos nuevos, hay que volver a leer: el
+                    // refresco invalida el cache a proposito, y dejarlo vacio aqui haria
+                    // que la proxima entrada volviera al disco otra vez. Releer repuebla
+                    // el cache con el catalogo recien bajado, que es el que debe servirse
+                    // a partir de ahora.
+                    if (refreshed) result = dealRepository.catalogSnapshot()
+                }
+
+                offline to result
             }
 
             val breakJob = async(Dispatchers.IO) {
                 freeSlots.currentBreakState()
             }
 
-            val (refreshed, snapshot) = catalogJob.await()
+            val (offline, snapshot) = catalogJob.await()
             val breakState = breakJob.await()
 
             // --- El cruce entre las dos, en el hilo de calculo ---
@@ -150,7 +177,7 @@ class DealsViewModel(application: Application) : AndroidViewModel(application) {
                     deals = applyFilter(ordered, it.selectedCategory),
                     categories = categories,
                     breakState = breakState,
-                    fromLocalData = !refreshed,
+                    fromLocalData = offline,
                     catalogSource = snapshot.source,
                     catalogElapsedMillis = snapshot.elapsedMillis
                 )
