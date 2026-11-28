@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.RadioButton
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -19,6 +20,7 @@ import com.group41.kotlinapp.network.CreateActivityRequest
 import com.group41.kotlinapp.repository.PendingActionRepository
 import com.group41.kotlinapp.sync.SyncScheduler
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * Activity managing Step 3 of the Activity Creation process (Location Selection & Offline Queueing).
@@ -26,6 +28,9 @@ import kotlinx.coroutines.launch
 class CreateActivityStep3Activity : AppCompatActivity() {
 
     private var selectedLocationId: Int? = null
+    private val photoPath by lazy {
+        intent.getStringExtra(CreateActivityStep1Activity.EXTRA_PHOTO_PATH)
+    }
 
     private val pendingActionRepository by lazy {
         PendingActionRepository(
@@ -42,6 +47,10 @@ class CreateActivityStep3Activity : AppCompatActivity() {
         }
 
         setContentView(R.layout.activity_create_activity_step3)
+        ActivityPhotoPreview.show(
+            findViewById<ImageView>(R.id.iv_activity_photo),
+            photoPath?.takeIf { it.isNotBlank() }?.let(::File)
+        )
 
         val root = findViewById<View>(R.id.main)
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
@@ -131,8 +140,6 @@ class CreateActivityStep3Activity : AppCompatActivity() {
             val startTime = intent.getStringExtra("EXTRA_START_TIME") ?: "2026-11-15T18:00:00Z"
             val endTime = intent.getStringExtra("EXTRA_END_TIME") ?: "2026-11-15T20:00:00Z"
             val description = intent.getStringExtra("EXTRA_DESCRIPTION")
-            // Step 2 forwards this local file path from Step 1 unchanged.
-            val photoPath = intent.getStringExtra(CreateActivityStep1Activity.EXTRA_PHOTO_PATH)
             val price = intent.getStringExtra("EXTRA_PRICE") ?: "Gratis"
             val capacity = intent.getIntExtra("EXTRA_CAPACITY", 10)
 

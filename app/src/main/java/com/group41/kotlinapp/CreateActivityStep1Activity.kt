@@ -3,7 +3,6 @@ package com.group41.kotlinapp
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.EditText
@@ -135,15 +134,11 @@ class CreateActivityStep1Activity : AppCompatActivity() {
     private fun showActivityPhoto() {
         val preview = findViewById<ImageView>(R.id.iv_activity_photo)
         val file = activityPhoto
-        if (ActivityPhotoStorage.isValidPhoto(file)) {
-            preview.setImageURI(Uri.fromFile(file))
-            preview.visibility = View.VISIBLE
-        } else {
+        if (!ActivityPhotoStorage.isValidPhoto(file)) {
             ActivityPhotoStorage.deletePhotoFile(file)
             activityPhoto = null
-            preview.setImageDrawable(null)
-            preview.visibility = View.GONE
         }
+        ActivityPhotoPreview.show(preview, activityPhoto)
     }
 
     /**
