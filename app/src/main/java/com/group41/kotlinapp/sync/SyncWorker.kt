@@ -11,7 +11,10 @@ import com.group41.kotlinapp.data.local.dao.SyncLogDao
 import com.group41.kotlinapp.data.local.entity.SyncLogEntity
 import com.group41.kotlinapp.data.local.entity.SyncOutcome
 import com.group41.kotlinapp.storage.DataExporter
+import com.group41.kotlinapp.cache.DealsMemoryCache
 import com.group41.kotlinapp.model.JoinPayload
+import com.group41.kotlinapp.model.RedeemDealPayload
+import com.group41.kotlinapp.network.DealInteractionDto
 import com.group41.kotlinapp.model.PendingAction
 import com.group41.kotlinapp.model.PendingActionType
 import com.group41.kotlinapp.network.ApiClient
@@ -61,6 +64,20 @@ class SyncWorker(
                 }
                 continue
             }
+            if (action.type == PendingActionType.REDEEM_DEAL) {
+                val redeemOutcome = sendRedeemDeal(action, app)
+                if (redeemOutcome != Outcome.DONE) allActionsSucceeded = false
+                when (redeemOutcome) {
+                    Outcome.DONE -> queue.markSynced(action)
+                    Outcome.REJECTED, Outcome.UNPROCESSABLE -> queue.discard(action)
+                    Outcome.RETRY_LATER -> {
+                        if (queue.recordFailure(action)) shouldRetryLater = true
+                    }
+                    Outcome.KEEP_PENDING -> Unit
+                }
+                continue
+            }
+
             val outcome = sendCreate(action, queue)
             // A rejected or discarded action is still a failed synchronization, even
             // when removing it leaves the queue empty. Do not report that as success.
@@ -102,6 +119,66 @@ class SyncWorker(
             throw e
         } catch (e: Exception) {
             creationFailureOutcome(e)
+        }
+    }
+
+    /**
+     * Manda al servidor una redencion de cupon que se hizo sin conexion.
+     *
+     * El contexto del descanso sale del payload y no se calcula ahora: el estudiante pudo
+     * redimir dentro de un hueco entre clases y esta accion salir tres horas despues.
+     * Calcularlo aqui registraria el descanso equivocado y la BQ-11 contaria mal.
+     *
+     * El reparto de errores es el mismo criterio que en las inscripciones: 4xx es
+     * definitivo salvo el 401, que significa que el token expiro y no que el dato este
+     * mal; 5xx y los fallos de red son temporales.
+     */
+    private suspend fun sendRedeemDeal(action: PendingAction, app: App): Outcome {
+        val payload = RedeemDealPayload.fromJson(action.payload) ?: return Outcome.UNPROCESSABLE
+        val deals = app.database.dealDao()
+
+        return try {
+            val response = ApiClient.api.redeemDeal(
+                dealId = payload.dealId,
+                context = DealInteractionDto(
+                    dealId = payload.dealId,
+                    type = "REDEEMED",
+                    duringBreak = payload.duringBreak,
+                    breakMinutesLeft = payload.breakMinutesLeft
+                )
+            )
+
+            // Llego: se guarda el codigo y se quita la marca de pendiente. El usuario ya
+            // puede ensenarlo en el local.
+            deals.markRedeemed(payload.dealId, pendingSync = false, code = response.redemptionCode)
+            DealsMemoryCache.invalidateAll()
+            Outcome.DONE
+
+        } catch (e: CancellationException) {
+            throw e
+
+        } catch (e: HttpException) {
+            lastHttpCode = e.code()
+
+            when {
+                // El token expiro. El dato esta bien, asi que se reintenta: descartarlo
+                // perderia una redencion valida por un problema de sesion.
+                e.code() == 401 -> Outcome.RETRY_LATER
+
+                e.code() in 400..499 -> {
+                    // Rechazo definitivo: el cupon vencio o el comercio lo retiro. Se
+                    // revierte en el telefono, porque dejarlo como redimido le prometeria
+                    // al usuario un descuento que no le van a aceptar.
+                    deals.revertRedemption(payload.dealId)
+                    DealsMemoryCache.invalidateAll()
+                    Outcome.REJECTED
+                }
+
+                else -> Outcome.RETRY_LATER
+            }
+
+        } catch (e: IOException) {
+            Outcome.RETRY_LATER
         }
     }
 

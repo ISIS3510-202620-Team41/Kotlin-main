@@ -10,6 +10,7 @@ import kotlinx.coroutines.sync.withLock
 import com.group41.kotlinapp.data.local.dao.PendingActionDao
 import com.group41.kotlinapp.data.local.entity.PendingActionEntity
 import com.group41.kotlinapp.model.JoinPayload
+import com.group41.kotlinapp.model.RedeemDealPayload
 import com.group41.kotlinapp.model.PendingAction
 import com.group41.kotlinapp.model.PendingActionType
 import com.group41.kotlinapp.network.ApiClient
@@ -415,6 +416,26 @@ class PendingActionRepository(
     }
 
     /**
+     * Guarda una redencion de cupon para enviarla cuando vuelva la conexion.
+     *
+     * @return true si se encolo, false si ya estaba encolada.
+     */
+    suspend fun enqueueRedeemDeal(
+        userId: String,
+        payload: RedeemDealPayload
+    ): Boolean = withContext(Dispatchers.IO) {
+        val entity = PendingActionEntity(
+            id = redeemDealActionId(userId, payload.dealId),
+            userId = userId,
+            actionType = PendingActionType.REDEEM_DEAL.name,
+            payload = payload.toJson().toString(),
+            createdAt = System.currentTimeMillis(),
+            retryCount = 0
+        )
+        dao.insertIfAbsent(entity) != -1L
+    }
+
+    /**
      * Devuelve todo lo que este usuario tiene pendiente, en el orden en que lo hizo.
      */
     suspend fun pendingFor(userId: String): List<PendingAction> = withContext(Dispatchers.IO) {
@@ -496,6 +517,16 @@ class PendingActionRepository(
         const val LOCAL_PHOTO_PATH = "localPhotoPath"
         const val BACKEND_ACTIVITY_ID = "backendActivityId"
         private const val PHOTO_UPLOADED = "photoUploaded"
+
+        /**
+         * El id de una redencion encolada.
+         *
+         * Derivado del usuario y del cupon, igual que el de las inscripciones, para que
+         * reintentar no cree una segunda redencion: tocar "Redimir" cinco veces sin
+         * conexion deja una sola fila, porque las cinco producen la misma clave.
+         */
+        fun redeemDealActionId(userId: String, dealId: String): String =
+            "${PendingActionType.REDEEM_DEAL.name}:$userId:$dealId"
 
         fun joinActionId(userId: String, activityId: String): String =
             "${PendingActionType.JOIN_ACTIVITY.name}:$userId:$activityId"

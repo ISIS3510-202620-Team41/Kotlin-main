@@ -12,6 +12,7 @@ import com.group41.kotlinapp.network.DealInteractionDto
 import com.group41.kotlinapp.repository.CatalogSource
 import com.group41.kotlinapp.repository.DealRepository
 import com.group41.kotlinapp.repository.FreeSlotsRepository
+import com.group41.kotlinapp.repository.PendingActionRepository
 import com.group41.kotlinapp.repository.RedeemResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -81,7 +82,12 @@ class DealsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = (application as App).database
 
-    private val dealRepository = DealRepository(dealDao = database.dealDao())
+    private val dealRepository = DealRepository(
+        dealDao = database.dealDao(),
+        // La cola se pasa para que una redencion hecha sin conexion no se quede solo
+        // marcada en el telefono: queda encolada y WorkManager la manda al volver la red.
+        pendingActions = PendingActionRepository(database)
+    )
     private val freeSlots = FreeSlotsRepository()
 
     private val _state = MutableStateFlow(DealsUiState())

@@ -47,7 +47,10 @@ enum class PendingActionType {
     CREATE_ACTIVITY,
 
     /** The activity already exists; retry only its JPEG upload. */
-    UPLOAD_ACTIVITY_PHOTO;
+    UPLOAD_ACTIVITY_PHOTO,
+
+    /** El usuario redimio un cupon comercial sin tener internet. */
+    REDEEM_DEAL;
 
     companion object {
         /**
@@ -99,5 +102,45 @@ data class CancelEnrollmentPayload(val activityId: String) {
     companion object {
         fun fromJson(json: JSONObject): CancelEnrollmentPayload? =
             json.optString("activityId").takeIf { it.isNotBlank() }?.let(::CancelEnrollmentPayload)
+    }
+}
+
+
+/**
+ * Lo que hace falta para redimir un cupon cuando vuelva la conexion.
+ *
+ * Lleva el contexto del descanso ademas del cupon, y esa es la razon de que exista en vez
+ * de guardar solo el id. El estudiante pudo redimir dentro de un hueco entre clases y que
+ * la accion se envie tres horas despues; si el servidor calculara ese contexto con la
+ * hora de llegada, registraria el descanso equivocado y la BQ-11 contaria mal.
+ */
+data class RedeemDealPayload(
+    val dealId: String,
+    val duringBreak: Boolean?,
+    val breakMinutesLeft: Int?
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put(KEY_DEAL_ID, dealId)
+        // Los nulos se guardan como JSONObject.NULL y no se omiten: "no se sabia si era
+        // un descanso" es un dato, y una clave ausente no se distingue de una perdida.
+        put(KEY_DURING_BREAK, duringBreak ?: JSONObject.NULL)
+        put(KEY_BREAK_MINUTES, breakMinutesLeft ?: JSONObject.NULL)
+    }
+
+    companion object {
+        private const val KEY_DEAL_ID = "dealId"
+        private const val KEY_DURING_BREAK = "duringBreak"
+        private const val KEY_BREAK_MINUTES = "breakMinutesLeft"
+
+        fun fromJson(json: JSONObject): RedeemDealPayload? {
+            val dealId = json.optString(KEY_DEAL_ID).takeIf { it.isNotBlank() } ?: return null
+            return RedeemDealPayload(
+                dealId = dealId,
+                duringBreak = if (json.isNull(KEY_DURING_BREAK)) null
+                else json.optBoolean(KEY_DURING_BREAK),
+                breakMinutesLeft = if (json.isNull(KEY_BREAK_MINUTES)) null
+                else json.optInt(KEY_BREAK_MINUTES)
+            )
+        }
     }
 }

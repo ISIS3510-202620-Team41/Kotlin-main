@@ -61,6 +61,8 @@ class DealRepositoryCacheTest {
 
         override suspend fun clearPendingSync(id: String) = Unit
 
+        override suspend fun revertRedemption(id: String) = Unit
+
         override suspend fun deleteExpired(now: String) = Unit
 
         override suspend fun count(): Int = stored.size
